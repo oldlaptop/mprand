@@ -1,0 +1,17 @@
+mprand is two things: the author's idea of a Tcl learning exercise, and a
+special-purpose mpd client to random-play from the entire mpd database
+(currently only with uniform distribution). It improves upon one other
+implementation of this concept of which I'm aware (Josh Kunz' ashuffle -
+https://github.com/Joshkunz/ashuffle) in two major respects; it does not rely on
+the deprecated 'listall' mpd request (which can quickly become prohibitively
+expensive with large databases over the network), and it ensures that there is
+always at least two songs in the queue, so that playback is continuous (mpd's
+gapless playback can function, and the built-in http streaming server will not
+go down between songs).
+
+USAGE
+
+At the moment this script accepts no options; simply execute it from this source
+directory, and it will begin random-playing on localhost:6600. Random play
+continues until another client stops playback, at which point mprand will
+terminate.
