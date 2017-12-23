@@ -5,8 +5,23 @@ source mpd_proto.tcl
 
 log "mprand starting..." 1
 
-set host localhost
-set port 6600
+if {[string length [array names env MPD_HOST]] > 0}\
+{
+	set host $env(MPD_HOST)
+}\
+else\
+{
+	set host localhost
+}
+
+if {[string length [array names env MPD_PORT]] > 0}\
+{
+	set port $env(MPD_PORT)
+}\
+else\
+{
+	set port 6600
+}
 
 set protoversion [connect $host $port]
 

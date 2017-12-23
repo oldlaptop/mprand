@@ -13,6 +13,7 @@ feature.
 USAGE
 
 At the moment this script accepts no options; simply execute it from this source
-directory, and it will begin random-playing on localhost:6600. Random play
-continues until another client stops playback, at which point mprand will
-terminate.
+directory, and it will begin random-playing on localhost:6600 (or the host and
+port specified by MPD_HOST and MPD_PORT, if these environment variables are
+set). Random play continues until another client stops playback, at which point
+mprand will terminate.
