@@ -3,7 +3,7 @@
 source util.tcl
 source mpd_proto.tcl
 
-log "mprand starting..." 1
+log "starting..." 1
 
 if {[string length [array names env MPD_HOST]] > 0}\
 {
@@ -68,7 +68,7 @@ while true\
 		# if another client stopped playback...
 		if {$statarr(state) == "stop"}\
 		{
-			log "mprand: playback stopped, terminating"
+			log "playback stopped, terminating"
 			break
 		}
 	}

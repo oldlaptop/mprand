@@ -12,7 +12,7 @@ proc log {msg {priority 0}}\
 	global log_level
 	if {$priority <= $log_level}\
 	{
-		puts $msg
+		puts "mprand: $msg"
 	}
 }
 
