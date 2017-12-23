@@ -161,6 +161,8 @@ proc clq {}\
 
 proc enq_song {song}\
 {
+	# mpd needs quotes escaped
+	set song [string map {\" \\\"} $song]
 	set err [send_command "addid \"$song\"" response]
 
 	if $err\
