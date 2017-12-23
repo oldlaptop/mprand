@@ -4,10 +4,11 @@ special-purpose mpd client to random-play from the entire mpd database
 implementation of this concept of which I'm aware (Josh Kunz' ashuffle -
 https://github.com/Joshkunz/ashuffle) in two major respects; it does not rely on
 the deprecated 'listall' mpd request (which can quickly become prohibitively
-expensive with large databases over the network), and it ensures that there is
+expensive with large databases over the network), and it ensures that there are
 always at least two songs in the queue, so that playback is continuous (mpd's
 gapless playback can function, and the built-in http streaming server will not
-go down between songs).
+go down between songs); this also serves as a primitive yet elegant "up next"
+feature.
 
 USAGE
 
