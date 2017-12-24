@@ -25,7 +25,7 @@ else\
 
 set protoversion [connect $host $port]
 
-if [string is false $protoversion]\
+if {[string is false $protoversion]}\
 {
 	log "error: could not connect"
 }
@@ -36,7 +36,7 @@ log "connected to $host port $port; mpd proto version $protoversion" 1
 
 player_status statarr
 set init_consume 1
-if !$statarr(consume)\
+if {!$statarr(consume)}\
 {
 	# remember to turn consume mode back off
 	set init_consume 0
@@ -49,12 +49,12 @@ rnd_song songinfo
 enq_song $songinfo(file)
 play
 
-while true\
+while {1}\
 {
 	set changes [idle_wait]
 
 	# perhaps we have moved on to the next song or stopped
-	if [lsearch $changes player]\
+	if {[lsearch $changes player]}\
 	{
 		player_status statarr
 
@@ -74,7 +74,7 @@ while true\
 	}
 }
 
-if !$init_consume\
+if {!$init_consume}\
 {
 	# restore original setting
 	consume 0

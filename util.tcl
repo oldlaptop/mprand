@@ -18,7 +18,7 @@ proc log {msg {priority 0}}\
 
 proc assert {expression}\
 {
-	if ![uplevel 1 expr $expression]\
+	if {![uplevel 1 expr $expression]}\
 	{
 		log "failed assert: $expression" -1
 		exit 1

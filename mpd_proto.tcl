@@ -49,14 +49,14 @@ proc send_command {cmd {upresponse ""}}\
 	flush $mpd_sock
 	set response [gets $mpd_sock]
 
-	while 1\
+	while {1}\
 	{
-		if [string match "*OK*" $response]\
+		if {[string match "*OK*" $response]}\
 		{
 			log "mpd command $cmd successful" 1
 			log "{response $response}" 2
 
-			if ![string is false $upresponse]\
+			if {![string is false $upresponse]}\
 			{
 				#elide \nOK
 				uplevel 1 set $upresponse "{[split [string range $response 0 end-3] \n]}"
@@ -64,7 +64,7 @@ proc send_command {cmd {upresponse ""}}\
 
 			return true
 		}\
-		elseif [string match "ACK*" $response]\
+		elseif {[string match "ACK*" $response]}\
 		{
 			log "mpd error: $cmd failed ($response)" 0
 			return false
@@ -82,7 +82,7 @@ proc idle_wait {}\
 {
 	set err [send_command idle response]
 
-	if $err\
+	if {$err}\
 	{
 		return $response
 	}\
@@ -98,7 +98,7 @@ proc player_status {arrname}\
 	upvar $arrname statarr
 	set err [send_command "status" response]
 
-	if $err\
+	if {$err}\
 	{
 		# construct an array with right-values as indices
 		carr statarr $response
@@ -114,7 +114,7 @@ proc nsongs {}\
 {
 	set err [send_command "stats" response]
 
-	if $err\
+	if {$err}\
 	{
 		return [string range [lsearch -inline $response "songs: *"] 7 end]
 	}\
@@ -132,7 +132,7 @@ proc rnd_song {arrname}\
 
 	set err [send_command "search file \"\" window $songnum:[expr $songnum + 1]" response]
 
-	if $err\
+	if {$err}\
 	{
 		carr songinfo $response
 		return true
@@ -165,7 +165,7 @@ proc enq_song {song}\
 	set song [string map {\" \\\"} $song]
 	set err [send_command "addid \"$song\"" response]
 
-	if $err\
+	if {$err}\
 	{
 		set spc [string first ":" $response]
 		return [string range $response $spc end]
