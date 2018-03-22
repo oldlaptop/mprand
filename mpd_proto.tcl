@@ -7,8 +7,7 @@ set check_err {if $err {return true} else {return false}}
 
 # construct an array from the common key: value format used by mpd, where value
 # may often contain ':' characters and whitespace
-proc carr {arrname inlist}\
-{
+proc carr {arrname inlist} {
 	upvar $arrname arr
 	set len [llength $inlist]
 	foreach elem $inlist\
@@ -22,8 +21,7 @@ proc carr {arrname inlist}\
 	}
 }
 
-proc connect {host port}\
-{
+proc connect {host port} {
 	global mpd_sock
 	set mpd_sock [socket $host $port]
 	#fconfigure $sock -blocking 0
@@ -40,8 +38,7 @@ proc connect {host port}\
 	}
 }
 
-proc send_command {cmd {upresponse ""}}\
-{
+proc send_command {cmd {upresponse ""}} {
 	global mpd_sock
 
 	puts $mpd_sock $cmd
@@ -78,8 +75,7 @@ proc send_command {cmd {upresponse ""}}\
 	assert false
 }
 
-proc idle_wait {}\
-{
+proc idle_wait {} {
 	set err [send_command idle response]
 
 	if {$err}\
@@ -93,8 +89,7 @@ proc idle_wait {}\
 }
 
 # rather looks like associative arrays were glued on, doesn't it?
-proc player_status {arrname}\
-{
+proc player_status {arrname} {
 	upvar $arrname statarr
 	set err [send_command "status" response]
 
@@ -110,8 +105,7 @@ proc player_status {arrname}\
 	}
 }
 
-proc nsongs {}\
-{
+proc nsongs {} {
 	set err [send_command "stats" response]
 
 	if {$err}\
@@ -124,8 +118,7 @@ proc nsongs {}\
 	}
 }
 
-proc rnd_song {arrname}\
-{
+proc rnd_song {arrname} {
 	upvar $arrname songinfo
 	set rng [::simulation::random::prng_Discrete [expr [nsongs] -1]]
 	set songnum [$rng]
@@ -143,8 +136,7 @@ proc rnd_song {arrname}\
 	}
 }
 
-proc consume {val}\
-{
+proc consume {val} {
 	assert "$val == 0 || $val == 1"
 	global check_err
 
@@ -152,15 +144,13 @@ proc consume {val}\
 	{*}$check_err
 }
 
-proc clq {}\
-{
+proc clq {} {
 	global check_err
 	set err [send_command "clear"]
 	{*}$check_err
 }
 
-proc enq_song {song}\
-{
+proc enq_song {song} {
 	# mpd needs quotes escaped
 	set song [string map {\" \\\"} $song]
 	set err [send_command "addid \"$song\"" response]
@@ -176,8 +166,7 @@ proc enq_song {song}\
 	}
 }
 
-proc play {}\
-{
+proc play {} {
 	global check_err
 	set err [send_command "play"]
 	{*}$check_err
