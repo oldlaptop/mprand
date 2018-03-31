@@ -27,9 +27,9 @@ log "connected to $host port $port; mpd proto version $protoversion" 1
 
 #log [consume] 1
 
-player_status statarr
+set statdict [player_status]
 set init_consume 1
-if {!$statarr(consume)} {
+if {![dict get $statdict consume]} {
 	# remember to turn consume mode back off
 	set init_consume 0
 }
@@ -37,8 +37,7 @@ if {!$statarr(consume)} {
 consume 1
 clq
 
-rnd_song songinfo
-enq_song $songinfo(file)
+enq_song [dict get [rnd_song] file]
 play
 
 while {1} {
@@ -46,18 +45,18 @@ while {1} {
 
 	# perhaps we have moved on to the next song or stopped
 	if {[lsearch $changes player]} {
-		player_status statarr
-
-		# if we're on the last song...
-		if {$statarr(playlistlength) == $statarr(song) + 1} {
-			rnd_song songinfo
-			enq_song $songinfo(file)
-		}
+		set statdict [player_status]
 
 		# if another client stopped playback...
-		if {$statarr(state) == "stop"} {
+		if {[dict get $statdict state] == "stop"} {
 			log "playback stopped, terminating"
 			break
+		}
+
+		# if we're on the last song or the playlist is empty...
+		set len [dict get $statdict playlistlength]
+		if {$len == 0 || $len == [dict get $statdict song] + 1} {
+			enq_song [dict get [rnd_song] file]
 		}
 	}
 }

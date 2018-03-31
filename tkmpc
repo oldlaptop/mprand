@@ -1,0 +1,29 @@
+#! /usr/bin/env wish
+
+package require Tk
+
+source util.tcl
+source mpd_proto.tcl
+
+wm title . "tkmpc"
+
+set protoversion [connect localhost 6600]}
+
+if {[string is false $protoversion]} {
+	exit
+}
+
+button .playbt -text "Play" -command play
+pack .playbt
+button .nextbt -text "Skip" -command next
+pack .nextbt
+
+listbox .playlistlb -height 0 -width 0
+
+set playlist [getq]
+
+foreach song $playlist {
+	.playlistlb insert end "[dict get $song Artist]: [dict get $song Title]"
+}
+
+pack .playlistlb
