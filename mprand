@@ -1,7 +1,7 @@
 #! /usr/bin/env tclsh
 
-source util.tcl
-source mpd_proto.tcl
+package require mpd_proto
+namespace import mpd_proto::*
 
 log "starting..." 1
 

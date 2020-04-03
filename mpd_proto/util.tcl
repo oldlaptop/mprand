@@ -1,15 +1,18 @@
+namespace eval mpd_proto {
+
 if {[string length [array names env LOG_LEVEL]] > 0} {
-	set log_level $env(LOG_LEVEL)
+	variable log_level $env(LOG_LEVEL)
 } else {
-	set log_level 0
+	variable log_level 0
 }
 
 proc log {msg {priority 0}} {
-	global log_level
+	variable log_level
 	if {$priority <= $log_level} {
 		puts "mprand: $msg"
 	}
 }
+namespace export log
 
 proc assert {expression} {
 	if {![uplevel 1 expr $expression]} {
@@ -17,3 +20,5 @@ proc assert {expression} {
 		exit 1
 	}
 }
+
+} ;# namespace eval mpd_proto

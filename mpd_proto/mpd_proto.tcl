@@ -1,9 +1,13 @@
 package require simulation::random
 
-set mpd_sock ""
+package provide mpd_proto 0.2
+
+namespace eval mpd_proto {
+
+variable mpd_sock ""
 
 # simple error-checking case
-set check_err {if $err {return true} else {return false}}
+variable check_err {if $err {return true} else {return false}}
 
 # construct an array from the common key: value format used by mpd, where value
 # may often contain ':' characters and whitespace
@@ -21,7 +25,7 @@ proc carr {arrname inlist} {
 }
 
 proc connect {host port} {
-	global mpd_sock
+	variable mpd_sock
 	set mpd_sock [socket $host $port]
 	#fconfigure $sock -blocking 0
 
@@ -33,9 +37,10 @@ proc connect {host port} {
 		return false
 	}
 }
+namespace export connect
 
 proc send_command {cmd {upresponse ""}} {
-	global mpd_sock
+	variable mpd_sock
 
 	puts $mpd_sock $cmd
 
@@ -55,20 +60,18 @@ proc send_command {cmd {upresponse ""}} {
 			}
 
 			return true
-		}\
-		elseif {[string match "ACK*" $response]}\
+		} elseif {[string match "ACK*" $response]}\
 		{
 			log "mpd error: $cmd failed ($response)" 0
 			return false
-		}\
-		else\
-		{
+		} else {
 			set response "$response\n[gets $mpd_sock]"
 		}
 	}
 
 	assert false
 }
+namespace export send_command
 
 proc idle_wait {} {
 	set err [send_command idle response]
@@ -79,6 +82,7 @@ proc idle_wait {} {
 		return false
 	}
 }
+namespace export idle_wait
 
 # rather looks like associative arrays were glued on, doesn't it?
 proc player_status {arrname} {
@@ -89,11 +93,11 @@ proc player_status {arrname} {
 		# construct an array with right-values as indices
 		carr statarr $response
 		return true
-	}\
-	else {
+	} else {
 		return false
 	}
 }
+namespace export player_status
 
 proc nsongs {} {
 	set err [send_command "stats" response]
@@ -104,6 +108,7 @@ proc nsongs {} {
 		return -1
 	}
 }
+namespace export nsongs
 
 proc rnd_song {arrname} {
 	upvar $arrname songinfo
@@ -119,20 +124,23 @@ proc rnd_song {arrname} {
 		return false
 	}
 }
+namespace export rnd_song
 
 proc consume {val} {
 	assert "$val == 0 || $val == 1"
-	global check_err
+	variable check_err
 
 	set err [send_command "consume $val"]
 	{*}$check_err
 }
+namespace export consume
 
 proc clq {} {
-	global check_err
+	variable check_err
 	set err [send_command "clear"]
 	{*}$check_err
 }
+namespace export clq
 
 proc enq_song {song} {
 	# mpd needs quotes escaped
@@ -146,9 +154,13 @@ proc enq_song {song} {
 		return -1
 	}
 }
+namespace export enq_song
 
 proc play {} {
-	global check_err
+	variable check_err
 	set err [send_command "play"]
 	{*}$check_err
 }
+namespace export play
+
+} ;# namespace eval mpd_proto
