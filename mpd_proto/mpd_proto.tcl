@@ -4,10 +4,43 @@ package provide mpd_proto 0.2
 
 namespace eval mpd_proto {
 
+variable CHARS_PER_READ 1024
+
 variable mpd_sock ""
 
 # simple error-checking case
 variable check_err {if $err {return true} else {return false}}
+
+proc readln {} {
+	variable CHARS_PER_READ
+	variable mpd_sock
+
+	set ret {}
+	do {
+		if {[chan blocked $mpd_sock]} {
+			chan event $mpd_sock readable [info coroutine]
+			yield
+		}
+		set ret [string cat $ret [read $mpd_sock $CHARS_PER_READ]]
+	} until {[string index $ret end] eq "\n"}
+	chan event $mpd_sock readable {}
+
+	return $ret
+}
+
+# Since we're in non-blocking mode, the event loop must be entered for sendstr
+# to work correctly. (In the request/response pattern this will generally happen
+# when readln yields to the event loop.)
+proc sendstr {str} {
+	variable mpd_sock
+
+	chan event $mpd_sock writable [info coroutine]
+	yield
+
+	puts $mpd_sock $str
+
+	chan event $mpd_sock writable {}
+}
 
 # construct an array from the common key: value format used by mpd, where value
 # may often contain ':' characters and whitespace
@@ -27,9 +60,9 @@ proc carr {arrname inlist} {
 proc connect {host port} {
 	variable mpd_sock
 	set mpd_sock [socket $host $port]
-	#fconfigure $sock -blocking 0
+	chan configure $mpd_sock -blocking 0
 
-	set protover [gets $mpd_sock]
+	set protover [readln]
 
 	if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
 		return [string range $protover 7 end]
@@ -42,10 +75,10 @@ namespace export connect
 proc send_command {cmd {upresponse ""}} {
 	variable mpd_sock
 
-	puts $mpd_sock $cmd
+	sendstr $cmd
 
 	flush $mpd_sock
-	set response [gets $mpd_sock]
+	set response [readln]
 
 	while {1} {
 		if {[string match "*OK*" $response]}\

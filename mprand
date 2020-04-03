@@ -3,6 +3,14 @@
 package require mpd_proto
 namespace import mpd_proto::*
 
+interp bgerror {} {apply {{err opts} {
+	log "error: $err" -1
+	log "details: [dict get $opts -errorinfo]" 0
+	exit 1
+}}}
+
+coroutine main apply { {} {
+
 log "starting..." 1
 
 if {[string length [array names env MPD_HOST]] > 0} {
@@ -20,7 +28,7 @@ if {[string length [array names env MPD_PORT]] > 0} {
 set protoversion [connect $host $port]
 
 if {[string is false $protoversion]} {
-	log "error: could not connect"
+	error "could not connect"
 }
 
 log "connected to $host port $port; mpd proto version $protoversion" 1
@@ -68,3 +76,9 @@ if {!$init_consume} {
 	# restore original setting
 	consume 0
 }
+
+set ::forever "is now"
+
+}} ;# coroutine main apply { {} {
+
+vwait ::forever

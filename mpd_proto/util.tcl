@@ -21,4 +21,17 @@ proc assert {expression} {
 	}
 }
 
+proc do {body spec predicate} {
+	switch $spec {
+		while {}
+		until { set predicate !($predicate) }
+		default { error "unknown do-spec $spec" }
+	}
+
+	uplevel 1 $body
+	while {[uplevel 1 [list expr $predicate]]} {
+		uplevel 1 $body
+	}
+}
+
 } ;# namespace eval mpd_proto
