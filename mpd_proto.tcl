@@ -7,12 +7,10 @@ set check_err {if $err {return true} else {return false}}
 
 # construct an array from the common key: value format used by mpd, where value
 # may often contain ':' characters and whitespace
-proc carr {arrname inlist}\
-{
+proc carr {arrname inlist} {
 	upvar $arrname arr
 	set len [llength $inlist]
-	foreach elem $inlist\
-	{
+	foreach elem $inlist {
 		# we cannot use 'split $elem :' because : may occur in
 		# the value
 		set pivot [string first : $elem]
@@ -22,26 +20,21 @@ proc carr {arrname inlist}\
 	}
 }
 
-proc connect {host port}\
-{
+proc connect {host port} {
 	global mpd_sock
 	set mpd_sock [socket $host $port]
 	#fconfigure $sock -blocking 0
 
 	set protover [gets $mpd_sock]
 
-	if {"{[string range $protover 0 5]}" == "{OK MPD}"}\
-	{
+	if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
 		return [string range $protover 7 end]
-	}\
-	else\
-	{
+	} else {
 		return false
 	}
 }
 
-proc send_command {cmd {upresponse ""}}\
-{
+proc send_command {cmd {upresponse ""}} {
 	global mpd_sock
 
 	puts $mpd_sock $cmd
@@ -49,8 +42,7 @@ proc send_command {cmd {upresponse ""}}\
 	flush $mpd_sock
 	set response [gets $mpd_sock]
 
-	while {1}\
-	{
+	while {1} {
 		if {[string match "*OK*" $response]}\
 		{
 			log "mpd command $cmd successful" 1
@@ -78,73 +70,57 @@ proc send_command {cmd {upresponse ""}}\
 	assert false
 }
 
-proc idle_wait {}\
-{
+proc idle_wait {} {
 	set err [send_command idle response]
 
-	if {$err}\
-	{
+	if {$err} {
 		return $response
-	}\
-	else\
-	{
+	} else {
 		return false
 	}
 }
 
 # rather looks like associative arrays were glued on, doesn't it?
-proc player_status {arrname}\
-{
+proc player_status {arrname} {
 	upvar $arrname statarr
 	set err [send_command "status" response]
 
-	if {$err}\
-	{
+	if {$err} {
 		# construct an array with right-values as indices
 		carr statarr $response
 		return true
 	}\
-	else\
-	{
+	else {
 		return false
 	}
 }
 
-proc nsongs {}\
-{
+proc nsongs {} {
 	set err [send_command "stats" response]
 
-	if {$err}\
-	{
+	if {$err} {
 		return [string range [lsearch -inline $response "songs: *"] 7 end]
-	}\
-	else\
-	{
+	} else {
 		return -1
 	}
 }
 
-proc rnd_song {arrname}\
-{
+proc rnd_song {arrname} {
 	upvar $arrname songinfo
 	set rng [::simulation::random::prng_Discrete [expr [nsongs] -1]]
 	set songnum [$rng]
 
 	set err [send_command "search file \"\" window $songnum:[expr $songnum + 1]" response]
 
-	if {$err}\
-	{
+	if {$err} {
 		carr songinfo $response
 		return true
-	}\
-	else\
-	{
+	} else {
 		return false
 	}
 }
 
-proc consume {val}\
-{
+proc consume {val} {
 	assert "$val == 0 || $val == 1"
 	global check_err
 
@@ -152,32 +128,26 @@ proc consume {val}\
 	{*}$check_err
 }
 
-proc clq {}\
-{
+proc clq {} {
 	global check_err
 	set err [send_command "clear"]
 	{*}$check_err
 }
 
-proc enq_song {song}\
-{
+proc enq_song {song} {
 	# mpd needs quotes escaped
 	set song [string map {\" \\\"} $song]
 	set err [send_command "addid \"$song\"" response]
 
-	if {$err}\
-	{
+	if {$err} {
 		set spc [string first ":" $response]
 		return [string range $response $spc end]
-	}\
-	else\
-	{
+	} else {
 		return -1
 	}
 }
 
-proc play {}\
-{
+proc play {} {
 	global check_err
 	set err [send_command "play"]
 	{*}$check_err
