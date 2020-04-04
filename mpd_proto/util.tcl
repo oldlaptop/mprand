@@ -1,23 +1,32 @@
 namespace eval mpd_proto {
 
-if {[string length [array names env LOG_LEVEL]] > 0} {
+if {[info exists env(LOG_LEVEL)]} {
+	##
+	# Messages with a priority greater than this will not be logged.
 	variable log_level $env(LOG_LEVEL)
 } else {
 	variable log_level 0
 }
 
+##
+# Channel to which logs will be sent; defaults to stderr.
+variable logchan stderr
+
+##
+# Send a message to the log.
+#
+# @param[in] msg Message to send
+# @param[in] priority Log priority (see log_level)
 proc log {msg {priority 0}} {
-	variable log_level
-	if {$priority <= $log_level} {
-		puts "mprand: $msg"
+	if {$priority <= $mpd_proto::log_level} {
+		puts $mpd_proto::logchan "mprand: $msg"
 	}
 }
 namespace export log
 
 proc assert {expression} {
 	if {![uplevel 1 expr $expression]} {
-		log "failed assert: $expression" -1
-		exit 1
+		error "failed assert: $expression"
 	}
 }
 
