@@ -25,6 +25,10 @@ if {[info exists env(MPD_PORT)]} {
 	set port 6600
 }
 
+if {[file exists $host]} {
+	puts "warning: AF_UNIX sockets are not supported, host \"$host\" will probably not work"
+}
+
 set protoversion [connect $host $port]
 
 log "connected to $host port $port; mpd proto version $protoversion" 1
