@@ -32,7 +32,6 @@ proc toggle_transport_controls {statespec} {
 
 # dict of the form {path newstate ...}
 proc change_states {widgetstates} {
-	puts $widgetstates
 	dict for {path statespec} $widgetstates {
 		$path state $statespec
 	}
@@ -95,7 +94,6 @@ proc update_transport_status {status} {
 proc update_queue {status} {
 	# if we're on the last song...
 	if {![dict exists $status nextsong]} {
-		puts "^$status^"
 		mpd_proto::enq_song [dict get [mpd_proto::rnd_song] file]
 		update_playlist_display [mpd_proto::player_status]
 	}
@@ -134,7 +132,6 @@ proc idleloop {} {
 					update_queue $status
 				}
 				case player {
-					puts $status
 					update_transport_status $status
 					update_queue $status
 				}
