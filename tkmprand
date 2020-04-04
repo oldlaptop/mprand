@@ -1,0 +1,168 @@
+#! /usr/bin/env wish
+
+package require Tk
+package require uri
+package require mpd_proto
+
+set ::host ""
+set ::port ""
+set ::connect_text "Connect"
+
+set ::next_transport_status Play
+set ::nowplaying {[Empty queue]}
+set ::upnext {[Nothing]}
+
+set ::lastsym 0
+
+set toggle_widgets {
+	.f.toggle
+	.f.skip
+}
+
+proc gensym {} { return "coroutine[incr lastsym]" }
+
+# Applies padding to a list of grid-ed widgets
+proc pad_grid_widgets {widgetList {amt 4}} {
+	foreach widget $widgetList {
+		grid configure $widget -padx $amt -pady $amt
+	}
+}
+
+proc connect {} {
+	switch $::connect_text {
+		Connect {
+			coroutine idleCor idleloop
+
+			set ::connect_text Disconnect
+			foreach path $::toggle_widgets {
+				$path state !disabled
+			}
+		}
+		Disconnect {
+			idleCor die
+
+			mpd_proto::disconnect
+			set ::connect_text Connect
+			foreach path $::toggle_widgets {
+				$path state disabled
+			}
+		}
+	}
+}
+
+proc idleloop {} {
+	if {![mpd_proto::isconnected]} {
+		mpd_proto::connect $::host $::port
+	}
+
+	while {true} {
+		puts goo
+		set subsystems [mpd_proto::idle_wait]
+		puts $subsystems
+# 		set status [mpd_proto::player_status]
+# 
+# 		switch [dict get $status state] {
+# 			play {
+# 				set ::next_transport_status Pause
+# 			}
+# 			pause -
+# 			stop {
+# 				set ::next_transport_status Play
+# 			}
+# 		}
+	}
+}
+
+# Do not call from idleloop...
+proc toggle_transport {} {
+	# It can take a notable fraction of a second for mpd to reply, and in
+	# the meantime this will have returned
+	foreach path $::toggle_widgets {
+		$path state disabled
+	}
+
+	idleCor die ;#...because it kills the idleloop
+	puts baz
+	switch [dict get [mpd_proto::player_status] state] {
+		play {
+			puts spam
+			mpd_proto::pause 1
+			puts duct
+		}
+		pause {
+			puts ham
+			mpd_proto::pause 0
+			puts tape
+		}
+		stop {
+			puts baked
+			mpd_proto::play
+			puts bean
+		}
+	}
+	coroutine idleCor idleloop
+
+	foreach path $::toggle_widgets {
+		$path state !disabled
+	}
+}
+
+ttk::frame .f
+
+ttk::frame .f.hostline
+ttk::label .f.hostline.host_label -text "MPD host:"
+ttk::entry .f.hostline.host -textvariable ::host
+ttk::label .f.hostline.port_label -text "Port:"
+ttk::entry .f.hostline.port -textvariable ::port -width 5
+ttk::button .f.hostline.connect -textvariable ::connect_text -command { connect }
+
+grid .f.hostline.host_label .f.hostline.host \
+	.f.hostline.port_label .f.hostline.port .f.hostline.connect -sticky ew
+
+grid columnconfigure .f.hostline 1 -weight 1
+grid columnconfigure .f.hostline 3 -weight 1 -minsize [winfo reqwidth .f.hostline.port]
+
+pad_grid_widgets [winfo children .f.hostline] 2
+
+ttk::label .f.curname -textvariable ::nowplaying
+ttk::button .f.toggle -textvariable ::next_transport_status -width 0 \
+	-command { coroutine [gensym] toggle_transport } -state disabled
+ttk::button .f.skip -text "Skip" -width 0 -state disabled \
+	-command { coroutine [gensym] skip }
+ttk::label .f.nextname -textvariable ::upnext
+
+grid .f.hostline   -           -             -       -sticky new
+grid .f.curname    -           .f.toggle     .f.skip -sticky ew
+grid x             .f.nextname -             -       -sticky ew
+
+grid columnconfigure .f 0 -weight 4
+grid columnconfigure .f 1 -weight 2
+grid columnconfigure .f 2 -weight 1
+grid columnconfigure .f 3 -weight 1
+
+grid rowconfigure .f 1 -weight 2
+grid rowconfigure .f 2 -weight 2
+
+pad_grid_widgets [winfo children .f] 2
+
+pack .f -expand yes -fill both
+
+trace add variable ::host write {apply {{name key op} {
+	if {[file exists $::host]} {
+		after idle [list tk_messageBox -icon error -message "AF_UNIX sockets are not supported, host \"$::host\" will probably not work."]
+	}
+}}}
+
+if {[info exists env(MPD_HOST)]} {
+	set host $env(MPD_HOST)
+} else {
+	set host localhost
+}
+
+if {[info exists env(MPD_PORT)]} {
+	set port $env(MPD_PORT)
+} else {
+	set port 6600
+}
+
+

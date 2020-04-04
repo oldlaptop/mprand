@@ -3,14 +3,42 @@ package require simulation::random
 package provide mpd_proto 0.2
 
 ##
-# Basic coroutine-based event-driven MPD protocol frontend.
+# Basic coroutine-based event-driven MPD protocol frontend. All procs exported
+# by this namespace, except for log and isconnected, must be called from a
+# coroutine context.
 namespace eval mpd_proto {
 
 variable CHARS_PER_READ 1024
+variable TIMEOUT 10000
 
-variable mpd_sock ""
+variable mpd_sock {}
+variable idling false
 
-proc readln {} {
+proc yield_or_die {after_id chanevent} {
+	variable mpd_sock
+	puts $after_id
+
+	set ret [yield]
+
+	after cancel $after_id
+	puts "cancelled $after_id"
+	chan event $mpd_sock $chanevent {}
+
+	switch $ret {
+		die {
+			rename [info coroutine] ""
+			yield ;# will immediately terminate the coroutine context
+		}
+		timeout {
+			error "mpd did not respond after $mpd_proto::TIMEOUT ms"
+		}
+		default {
+		}
+	}
+	return $ret
+}
+
+proc readln {{timeout true}} {
 	variable CHARS_PER_READ
 	variable mpd_sock
 
@@ -18,11 +46,15 @@ proc readln {} {
 	do {
 		if {[chan blocked $mpd_sock]} {
 			chan event $mpd_sock readable [info coroutine]
-			yield
+			if {$timeout} {
+				set timeout_id [after $mpd_proto::TIMEOUT [info coroutine] timeout]
+			} else {
+				set timeout_id {} ;# cancelling this is a nop
+			}
+			yield_or_die $timeout_id readable
 		}
 		set ret [string cat $ret [read $mpd_sock $CHARS_PER_READ]]
 	} until {[string index $ret end] eq "\n"}
-	chan event $mpd_sock readable {}
 
 	return $ret
 }
@@ -34,33 +66,39 @@ proc sendstr {str} {
 	variable mpd_sock
 
 	chan event $mpd_sock writable [info coroutine]
-	yield
+	set timeout_id [after $mpd_proto::TIMEOUT [info coroutine] timeout]
+	yield_or_die $timeout_id writable
 
 	puts $mpd_sock $str
-
-	chan event $mpd_sock writable {}
 }
 
 ##
-# Send a raw command string to MPD, and place its response into a variable.
+# Send a raw command string to MPD, and place its response into a variable. If
+# there was a pending idle event, it is cancelled; the caller is advised to
+# restart any idle_wait loop that may have been ongoing.
 #
 # @param[in] cmd The string to send MPD, as it will go over the wire.
 # @param[out] upresponse Name of a variable into which MPD's response will be
 #                        placed. If not specified, the response will be thrown
 #                        away.
+# @param[in] timeout Whether to enable timeouts for the reply
 #
 # @return true if MPD responded OK, false if MPD responded ACK
-proc send_command {cmd {upresponse ""}} {
+proc send_command {cmd {upresponse ""} {timeout true}} {
+	if {$mpd_proto::idling && $cmd ne "noidle" && $cmd ne "idle"} {
+		send_command noidle
+		set mpd_proto::idling false
+	}
 	variable mpd_sock
 
 	if {$upresponse ne ""} {
 		upvar $upresponse response
 	}
-	
+
 	sendstr $cmd
 	
 	flush $mpd_sock
-	set response [readln]
+	set response [readln $timeout]
 
 	if {[string match "*OK*" $response]} {
 		log "mpd command $cmd successful" 1
@@ -138,13 +176,34 @@ proc connect {host port} {
 namespace export connect
 
 ##
+# Disconnect from MPD.
+proc disconnect {} {
+	chan close $mpd_proto::mpd_sock
+	set mpd_proto::mpd_sock ""
+}
+
+##
+# @return true if the connection is open to the best of our knowledge, false
+#         otherwise
+proc isconnected {} {
+	expr {$mpd_proto::mpd_sock ne ""}
+}
+
+##
 # Wait in the event loop until MPD signals an idleevent.
 #
 # @return MPD's <a href="https://www.musicpd.org/doc/html/protocol.html#command-idle">
 #         idleevent response as a list of each changed subsystem.
 proc idle_wait {} {
+	if {$mpd_proto::idling} {
+		error "already idling"
+	}
+
 	set ret [list]
-	set err [send_command idle response]
+
+	set mpd_proto::idling true
+	set err [send_command idle response false]
+	set mpd_proto::idling false
 
 	checkerr $err
 	foreach {changed subsystem} [string map {: { }} $response] {
@@ -245,5 +304,17 @@ proc play {} {
 	checkerr [send_command "play"]
 }
 namespace export play
+
+##
+# Set pause status, or just pause if given no arguments.
+#
+# @param[in] status New pause status
+proc pause {{status 1}} {
+	if {!($status == 0 || $status == 1)} {
+		error "invalid pause status $status"
+	}
+
+	checkerr [send_command "pause $status"]
+}
 
 } ;# namespace eval mpd_proto
