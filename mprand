@@ -13,14 +13,14 @@ coroutine main apply { {} {
 
 log "starting..." 1
 
-if {[info exists env(MPD_HOST)]} {
-	set host $env(MPD_HOST)
+if {[info exists ::env(MPD_HOST)]} {
+	set host $::env(MPD_HOST)
 } else {
 	set host localhost
 }
 
-if {[info exists env(MPD_PORT)]} {
-	set port $env(MPD_PORT)
+if {[info exists ::env(MPD_PORT)]} {
+	set port $::env(MPD_PORT)
 } else {
 	set port 6600
 }
