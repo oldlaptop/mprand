@@ -210,9 +210,13 @@ namespace export rnd_song
 ##
 # Set MPD's consume status.
 #
-# @param[in] val New consume status.
-proc consume {val} {
-	checkerr [send_command "consume $val"]
+# @param[in] status New consume status.
+proc consume {status} {
+	if {!($status == 0 || $status == 1)} {
+		error "invalid consume status $status"
+	}
+
+	checkerr [send_command "consume $status"]
 }
 namespace export consume
 
