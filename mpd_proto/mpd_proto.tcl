@@ -4,8 +4,8 @@ package provide mpd_proto 0.2
 
 ##
 # Basic coroutine-based event-driven MPD protocol frontend. All procs exported
-# by this namespace, except for log and isconnected, must be called from a
-# coroutine context.
+# by this namespace, unless otherwise noted, must be called from a coroutine
+# context.
 namespace eval mpd_proto {
 
 variable CHARS_PER_READ 1024
@@ -16,12 +16,10 @@ variable idling false
 
 proc yield_or_die {after_id chanevent} {
 	variable mpd_sock
-	puts $after_id
 
 	set ret [yield]
 
 	after cancel $after_id
-	puts "cancelled $after_id"
 	chan event $mpd_sock $chanevent {}
 
 	switch $ret {
@@ -54,7 +52,9 @@ proc readln {{timeout true}} {
 			yield_or_die $timeout_id readable
 		}
 		set ret [string cat $ret [read $mpd_sock $CHARS_PER_READ]]
-	} until {[string index $ret end] eq "\n"}
+	} until {[string match "*OK\n" $ret] ||
+	         [string match "OK MPD *\n" $ret] ||
+	         [string match "ACK \\\[*@*\\\] \{*\} *\n" $ret]}
 
 	return $ret
 }
@@ -110,7 +110,7 @@ proc send_command {cmd {upresponse ""} {timeout true}} {
 
 		return false
 	} else {
-		set response "$response\n[gets $mpd_sock]"
+		error "incomprehensible response from MPD: $response"
 	}
 }
 
@@ -161,16 +161,20 @@ proc checkerr {err {response nil}} {
 #
 # @return MPD's protocol version.
 proc connect {host port} {
-	variable mpd_sock
-	set mpd_sock [socket $host $port]
-	chan configure $mpd_sock -blocking 0
+	if {![isconnected]} {
+		variable mpd_sock
+		set mpd_sock [socket $host $port]
+		chan configure $mpd_sock -blocking 0
 
-	set protover [readln]
+		set protover [readln]
 
-	if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
-		return [string range $protover 7 end]
+		if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
+			return [string range $protover 7 end]
+		} else {
+			error "could not connect to MPD (response: $protover)"
+		}
 	} else {
-		error "could not connect to MPD (response: $protover)"
+		error "already connected; call disconnect first?"
 	}
 }
 namespace export connect
@@ -181,13 +185,17 @@ proc disconnect {} {
 	chan close $mpd_proto::mpd_sock
 	set mpd_proto::mpd_sock ""
 }
+namespace export disconnect
 
 ##
+# Does not require a coroutine context.
+#
 # @return true if the connection is open to the best of our knowledge, false
 #         otherwise
 proc isconnected {} {
 	expr {$mpd_proto::mpd_sock ne ""}
 }
+namespace export isconnected
 
 ##
 # Wait in the event loop until MPD signals an idleevent.
@@ -267,6 +275,32 @@ proc rnd_song {} {
 namespace export rnd_song
 
 ##
+# Fetch a song from the queue, by id
+#
+# @param id A song's queue-unique identifier
+#
+# @return A large dict from MPD containing information on the selected song.
+proc song_by_queueid {id} {
+	set err [send_command "playlistid $id" response]
+	return [checkerr $err $response]
+}
+
+##
+# Get a song's title from a song-dict. Does not require a coroutine context.
+#
+# @param song A song-dict as returned from rnd_song, song_by_queueid, etc.
+#
+# @return The song's title, or "Unknown Title" if it has none.
+proc song_title {song} {
+	expr {
+		[dict exists $song Title]
+			? [dict get $song Title]
+			: "Unknown Title"
+	}
+}
+
+
+##
 # Set MPD's consume status.
 #
 # @param[in] val New consume status.
@@ -316,5 +350,20 @@ proc pause {{status 1}} {
 
 	checkerr [send_command "pause $status"]
 }
+namespace export pause
+
+##
+# Skip to the next song.
+proc next {} {
+	checkerr [send_command "next"]
+}
+namespace export next
+
+##
+# Stop playback.
+proc stop {} {
+	checkerr [send_command "stop"]
+}
+namespace export stop
 
 } ;# namespace eval mpd_proto
