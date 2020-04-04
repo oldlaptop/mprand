@@ -6,12 +6,18 @@ package provide mpd_proto 0.2
 # Basic coroutine-based event-driven MPD protocol frontend. All procs exported
 # by this namespace, unless otherwise noted, must be called from a coroutine
 # context.
+#
+# The minimum supported MPD version should in principle be 0.13, but this
+# severely restricts the functionality available. Commands that use features
+# introduced since that time check the version of the connected MPD and throw an
+# error if it's insufficient.
 namespace eval mpd_proto {
 
 variable CHARS_PER_READ 1024
 variable TIMEOUT 10000
 
 variable mpd_sock {}
+variable mpd_version {}
 variable idling false
 
 proc yield_or_die {after_id chanevent} {
@@ -163,13 +169,14 @@ proc checkerr {err {response nil}} {
 proc connect {host port} {
 	if {![isconnected]} {
 		variable mpd_sock
+		variable mpd_version
 		set mpd_sock [socket $host $port]
 		chan configure $mpd_sock -blocking 0
 
 		set protover [readln]
 
 		if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
-			return [string range $protover 7 end]
+			return [set mpd_version [string range $protover 7 end]]
 		} else {
 			error "could not connect to MPD (response: $protover)"
 		}
@@ -184,6 +191,7 @@ namespace export connect
 proc disconnect {} {
 	chan close $mpd_proto::mpd_sock
 	set mpd_proto::mpd_sock ""
+	set mpd_proto::mpd_version ""
 }
 namespace export disconnect
 
@@ -198,13 +206,16 @@ proc isconnected {} {
 namespace export isconnected
 
 ##
-# Wait in the event loop until MPD signals an idleevent.
+# Wait in the event loop until MPD signals an idleevent. Requires MPD >=0.14.
 #
 # @return MPD's <a href="https://www.musicpd.org/doc/html/protocol.html#command-idle">
 #         idleevent response as a list of each changed subsystem.
 proc idle_wait {} {
 	if {$mpd_proto::idling} {
 		error "already idling"
+	}
+	if {$mpd_proto::mpd_version < 0.14} {
+		error "this mpd doesn't support idle"
 	}
 
 	set ret [list]
@@ -261,6 +272,7 @@ namespace export nsongs
 
 ##
 # Fetch a random song from MPD's database, with uniform(ish) distribution.
+# Requires MPD >= 0.20.
 #
 # @return A large dict from MPD containing information on the selected song. Its
 #         contents do not appear to be documented, and depend to some extent on
@@ -268,6 +280,10 @@ namespace export nsongs
 #         'file', containing the file's path in MPD's hierarchy, and 'duration',
 #         in seconds.
 proc rnd_song {} {
+	if {$mpd_version < 0.20} {
+		error "this mpd doesn't support search windows"
+	}
+
 	set rng [::simulation::random::prng_Discrete [expr [nsongs] -1]]
 	set songnum [$rng]
 
@@ -304,10 +320,14 @@ proc song_name {song} {
 
 
 ##
-# Set MPD's consume status.
+# Set MPD's consume status. Requires MPD >= 0.15.
 #
 # @param[in] val New consume status.
 proc consume {val} {
+	if {$mpd_proto::mpd_version < 0.15} {
+		error "this mpd doesn't support consume"
+	}
+
 	checkerr [send_command "consume $val"]
 }
 namespace export consume
