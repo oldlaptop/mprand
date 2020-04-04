@@ -219,6 +219,9 @@ proc idle_wait {} {
 			lappend ret $subsystem
 		}
 	}
+
+	log "mpd reports change(s) in: $ret" 1
+
 	return $ret
 }
 namespace export idle_wait
@@ -286,16 +289,16 @@ proc song_by_queueid {id} {
 }
 
 ##
-# Get a song's title from a song-dict. Does not require a coroutine context.
+# Get a song's Title from a song-dict. Does not require a coroutine context.
 #
 # @param song A song-dict as returned from rnd_song, song_by_queueid, etc.
 #
-# @return The song's title, or "Unknown Title" if it has none.
-proc song_title {song} {
+# @return The song's Title, or its filename if there is no Title tag.
+proc song_name {song} {
 	expr {
 		[dict exists $song Title]
 			? [dict get $song Title]
-			: "Unknown Title"
+			: [file tail [dict get $song file]]
 	}
 }
 

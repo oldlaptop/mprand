@@ -105,9 +105,9 @@ proc update_playlist_display {status} {
 	set nextid [expr {[dict exists $status nextsongid]
 		? [dict get $status nextsongid]
 		: "nil"}]
-	set ::nowplaying [mpd_proto::song_title [mpd_proto::song_by_queueid $curid]]
+	set ::nowplaying [mpd_proto::song_name [mpd_proto::song_by_queueid $curid]]
 	if {$nextid ne "nil"} {
-		set ::upnext [mpd_proto::song_title [mpd_proto::song_by_queueid $nextid]]
+		set ::upnext [mpd_proto::song_name [mpd_proto::song_by_queueid $nextid]]
 	} else {
 		set ::upnext {[None]}
 	}
@@ -132,6 +132,7 @@ proc idleloop {} {
 					update_queue $status
 				}
 				case player {
+					update_playlist_display $status
 					update_transport_status $status
 					update_queue $status
 				}
