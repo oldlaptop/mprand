@@ -126,7 +126,12 @@ proc send_command {cmd {upresponse ""} {timeout true}} {
 #
 # @param[in] inlist Raw key: value response from MPD
 #
-# @return inlist converted to dict form
+# @return inlist converted to dict form, with keys normalized to all-lowercase;
+#         values are lists, with repeated keys stored as multiple elements.
+#         Most of these lists will generally have a single element, and values
+#         that are specified in the protocol as a single integer or word (i.e.
+#         that contain no whitespace) should be safe to use directly without
+#         [lindex $foo 0].
 proc cdict {inlist} {
 	set ret [dict create]
 	foreach elem [split $inlist \n] {
@@ -135,9 +140,14 @@ proc cdict {inlist} {
 		set pivot [string first : $elem]
 		# if mpd uses the empty string as a key, I don't like it anymore
 		if {$pivot > 0} {
-			set key [string range $elem 0 [expr $pivot - 1]]
+			set key [string tolower [string range $elem 0 [expr $pivot - 1]]]
 			set val [string range $elem [expr $pivot + 2] end]
-			dict set ret $key $val
+
+			if {[dict exists $ret $key]} {
+				log "warning: duplicate keys from mpd: $key (values [dict get $ret $key], $val)" 2
+			}
+
+			dict lappend ret $key $val
 		}
 	}
 	return $ret
@@ -305,17 +315,17 @@ proc song_by_queueid {id} {
 }
 
 ##
-# Get a song's Title from a song-dict. Does not require a coroutine context.
+# Get a song's title from a song-dict. Does not require a coroutine context.
 #
 # @param song A song-dict as returned from rnd_song, song_by_queueid, etc.
 #
-# @return The song's Title, or its filename if there is no Title tag.
+# @return The song's title, or its filename if there is no title tag.
 proc song_name {song} {
-	expr {
-		[dict exists $song Title]
-			? [dict get $song Title]
+	lindex [expr {
+		[dict exists $song title]
+			? [dict get $song title]
 			: [file tail [dict get $song file]]
-	}
+	}] 0
 }
 
 
