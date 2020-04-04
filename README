@@ -1,6 +1,5 @@
-mprand is two things: the author's idea of a Tcl learning exercise, and a
-special-purpose mpd client to random-play from the entire mpd database
-(currently only with uniform distribution). It improves upon one other
+mprand is a special-purpose mpd client to random-play from the entire mpd
+database (currently only with uniform distribution). It improves upon one other
 implementation of this concept of which I'm aware (Josh Kunz' ashuffle -
 https://github.com/Joshkunz/ashuffle) in two major respects; it does not rely on
 the deprecated 'listall' mpd request (which can quickly become prohibitively
@@ -10,10 +9,17 @@ gapless playback can function, and the built-in http streaming server will not
 go down between songs); this also serves as a primitive yet elegant "up next"
 feature.
 
+The code mprand uses to talk to MPD is factored into a package named mpd_proto;
+this may prove useful as the nucleus of an MPD client library for some other
+purpose; expanding mpd_proto into a full MPD client library for Tcl is a long-
+term goal.
+
 USAGE
 
-At the moment this script accepts no options; simply execute it from this source
-directory, with . in TCLLIBPATH, and it will begin random-playing on 
-localhost:6600 (or the host and port specified by MPD_HOST and MPD_PORT, if
-these environment variables are set). Random play continues until another client
-stops playback, at which point mprand will terminate.
+At the moment this script accepts no options; simply execute it, and it will
+begin random-playing on localhost:6600 (or the host and port specified by
+MPD_HOST and MPD_PORT, if these environment variables are set). Random play
+continues until another client stops playback, at which point mprand will
+terminate. Note that the mpd_proto/ directory must be located somewhere in
+Tcl's package search path; the easiest way to accomplish this is to set
+TCLLIBPATH="." or something to that effect in the environment.
