@@ -388,7 +388,7 @@ namespace export albumart
 # Set MPD's consume status. Requires MPD >= 0.15.
 #
 # @param[in] val New consume status.
-proc consume {val} {
+proc consume {status} {
 	if {$mpd_proto::mpd_version < 0.15} {
 		error "this mpd doesn't support consume"
 	}
@@ -396,7 +396,7 @@ proc consume {val} {
 		error "invalid consume status $status"
 	}
 
-	checkerr [send_command "consume $val"]
+	checkerr [send_command "consume $status"]
 }
 namespace export consume
 

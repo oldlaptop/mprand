@@ -38,7 +38,7 @@ set init_consume [dict get [player_status] consume]
 consume 1
 clear
 
-enq_song [dict get [rnd_song] file]
+enq_song [lindex [dict get [rnd_song] file] 0]
 play
 
 while {1} {
@@ -48,7 +48,7 @@ while {1} {
 
 		# if we're on the last song...
 		if {[dict get $status playlistlength] eq ([dict get $status song] + 1)} {
-			enq_song [dict get [rnd_song] file]
+			enq_song [lindex [dict get [rnd_song] file] 0]
 		}
 
 		# if another client stopped playback...
