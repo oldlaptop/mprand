@@ -161,7 +161,6 @@ proc cdict {inlist} {
 #
 # @return str quoted for MPD
 proc quote {str} {
-	puts "\"[string map {\" \\\" \\ \\\\} $str]\""
 	return "\"[string map {\" \\\" \\ \\\\} $str]\""
 }
 

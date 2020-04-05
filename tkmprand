@@ -191,7 +191,6 @@ proc update_playlist_display {status} {
 proc idleloop {} {
 	if {![mpd_proto::isconnected]} {
 		mpd_proto::connect $::host $::port
-		puts goo
 	}
 
 	set status [mpd_proto::player_status]
@@ -202,7 +201,6 @@ proc idleloop {} {
 		set status [mpd_proto::player_status]
 
 		foreach subsystem $subsystems {
-			puts $subsystem
 			switch $subsystem {
 				case playlist {
 					update_playlist_display $status
