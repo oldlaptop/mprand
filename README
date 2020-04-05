@@ -1,13 +1,13 @@
 mprand is a special-purpose mpd client to random-play from the entire mpd
 database (currently only with uniform distribution). It improves upon one other
 implementation of this concept of which I'm aware (Josh Kunz' ashuffle -
-https://github.com/Joshkunz/ashuffle) in two major respects; it does not rely on
-the deprecated 'listall' mpd request (which can quickly become prohibitively
-expensive with large databases over the network), and it ensures that there are
+https://github.com/Joshkunz/ashuffle) in one major respect: it does not rely on
+the deprecated 'listallinfo' mpd request (which can quickly become prohibitively
+expensive with large databases over the network). It also ensures that there are
 always at least two songs in the queue, so that playback is continuous (mpd's
 gapless playback can function, and the built-in http streaming server will not
 go down between songs); this also serves as a primitive yet elegant "up next"
-feature.
+feature. (ashuffle can do this, but does not behave this way by default.)
 
 tkmprand expands on this concept by providing a GUI client for perpetual random
 play, providing a status and up-next display and minimal transport controls,
