@@ -2,7 +2,20 @@
 
 package require Tk
 package require uri
+
 package require mpd_proto
+namespace import mpd_proto::log
+
+
+if {[catch {package require Img}] != 0} {
+	log "warning: could not find Img (often packaged as libtk-img), cover art support will be limited to builtin Tk photo backends (only PPM, PGM, PNG, GIF are guaranteed)"
+}
+
+set ::NP_MAX_LINE_PX 384
+set ::NP_COVER_SIZE 96
+set ::UPNEXT_COVER_SIZE 48
+set ::NP_MAX_NAME_LEN 48
+set ::UPNEXT_MAX_NAME_LEN 48
 
 set ::host ""
 set ::port ""
@@ -14,7 +27,9 @@ set ::upnext {[Nothing]}
 
 set ::lastsym 0
 
-proc gensym {} { return "coroutine[incr lastsym]" }
+namespace eval img {}
+
+proc gensym {} { return "sym[incr ::lastsym]" }
 
 set toggle_widgets {
 	.f.toggle
@@ -44,6 +59,24 @@ proc pad_grid_widgets {widgetList {amt 4}} {
 	}
 }
 
+# (naively) scale an image to fit within a $max * $max square; see:
+# https://wiki.tcl-lang.org/page/Image+scaling
+proc scale {imagename max} {
+	set ix [image width $imagename]
+	set iy [image height $imagename]
+	set initial [expr {max($ix, $iy)}]
+
+	set factor [expr {max($initial, $max) / min($initial, $max)}]
+
+	set mode [expr {$initial > $max ? "-subsample" : "-zoom"}]
+
+	set tmpimg [image create photo img::[gensym]]
+	$tmpimg copy $imagename
+	$imagename blank
+	$imagename copy $tmpimg -shrink $mode $factor
+	image delete $tmpimg
+}
+
 proc connect {} {
 	switch $::connect_text {
 		Connect {
@@ -61,6 +94,8 @@ proc connect {} {
 			set ::connect_text Connect
 			set ::nowplaying {[Empty queue]}
 			set ::upnext {[Nothing]}
+			img::cur_cover blank
+			img::next_cover blank
 
 			toggle_transport_controls disabled
 			.f.hostline.host state !disabled
@@ -94,31 +129,59 @@ proc update_transport_status {status} {
 proc update_queue {status} {
 	# if we're on the last song...
 	if {![dict exists $status nextsong]} {
-		mpd_proto::enq_song [dict get [mpd_proto::rnd_song] file]
+		mpd_proto::enq_song [lindex [dict get [mpd_proto::rnd_song] file] 0]
 		update_playlist_display [mpd_proto::player_status]
 	}
 }
 
 # Call only from idleloop or guarded by idleloop termination/restart
 proc update_playlist_display {status} {
-	set curid [dict get $status songid]
+	set curid [expr {[dict exists $status songid]
+		? [dict get $status songid]
+		: "nil"}]
 	set nextid [expr {[dict exists $status nextsongid]
 		? [dict get $status nextsongid]
 		: "nil"}]
-	set ::nowplaying [mpd_proto::song_name [mpd_proto::song_by_queueid $curid]]
-	if {$nextid ne "nil"} {
-		set ::upnext [mpd_proto::song_name [mpd_proto::song_by_queueid $nextid]]
-	} else {
-		set ::upnext {[None]}
+
+	foreach {id textvar imgname namelen size} [list \
+		$curid ::nowplaying img::cur_cover \
+		$::NP_MAX_NAME_LEN $::NP_COVER_SIZE \
+		$nextid ::upnext img::next_cover \
+		$::UPNEXT_MAX_NAME_LEN \
+		$::UPNEXT_COVER_SIZE
+	] {
+		if {$id ne "nil"} {
+			set songdict [mpd_proto::song_by_queueid $id]
+			set $textvar [string range [mpd_proto::song_name $songdict] 0 $namelen-1]
+			if {[catch {
+				$imgname blank
+				$imgname put [
+					dict get [mpd_proto::albumart [lindex [dict get $songdict file] 0]] binary
+				]
+				scale $imgname $size
+			} err opts] != 0} {
+				$imgname blank
+				log "warning: could not display album art for [mpd_proto::song_name $songdict]: $err"
+				log [dict get $opts -errorinfo] 1
+			}
+
+		} else {
+			set $textvar {[None]}
+			$imgname blank
+		}
 	}
 }
 
 proc idleloop {} {
 	if {![mpd_proto::isconnected]} {
 		mpd_proto::connect $::host $::port
+		puts goo
 	}
 
+	puts foo
+
 	set status [mpd_proto::player_status]
+	puts bar
 	update_transport_status $status
 	update_playlist_display $status
 	while {true} {
@@ -206,31 +269,45 @@ grid columnconfigure .f.hostline 3 -weight 1 -minsize [winfo reqwidth .f.hostlin
 
 pad_grid_widgets [winfo children .f.hostline] 2
 
-ttk::label .f.curname -textvariable ::nowplaying
+image create photo img::cur_cover
+font create np_font -size 18 -slant italic
+ttk::label .f.curname -textvariable ::nowplaying -image img::cur_cover \
+	-compound left -font np_font -width -[expr {$::NP_MAX_NAME_LEN / 2}] \
+	-wraplength $::NP_MAX_LINE_PX
+
 ttk::button .f.stop -text "Stop" -width 0 -state disabled \
 	-command { coroutine [gensym] stop }
 ttk::button .f.toggle -textvariable ::next_transport_status -width 0 \
 	-command { coroutine [gensym] toggle_transport } -state disabled
 ttk::button .f.skip -text "Skip" -width 0 -state disabled \
 	-command { coroutine [gensym] skip }
-ttk::label .f.nextname -textvariable ::upnext
+
+image create photo img::next_cover
+font create next_font -size 12 -slant italic
+
+ttk::labelframe .f.n -text "Up Next:"
+ttk::label .f.n.nextname -textvariable ::upnext -image img::next_cover \
+	-compound left -font next_font -width -$::UPNEXT_MAX_NAME_LEN
+grid .f.n.nextname -sticky nsew
+grid rowconfigure .f.n 0 -minsize $::UPNEXT_COVER_SIZE
 
 grid .f.hostline   -           -             -             -       -sticky new
 grid .f.curname    -           .f.stop       .f.toggle     .f.skip -sticky ew
-grid x             .f.nextname -             -             x       -sticky w
+grid x             .f.n        -             -             x       -sticky w
 
-grid configure .f.curname -sticky ns
+grid configure .f.curname -sticky wns
 
-grid columnconfigure .f 0 -weight 2
-grid columnconfigure .f 1 -weight 2
+grid columnconfigure .f 0 -weight 2 -minsize $::NP_COVER_SIZE
+grid columnconfigure .f 1 -weight 2 -minsize [expr {[winfo reqwidth .f.curname] + 16}]
 grid columnconfigure .f 2 -weight 1
 grid columnconfigure .f 3 -weight 1
 
-grid rowconfigure .f 1 -weight 2
+grid rowconfigure .f 1 -weight 2 -minsize [expr {$::NP_COVER_SIZE + 24}]
 grid rowconfigure .f 2 -weight 2
 
 pad_grid_widgets [winfo children .f] 2
-grid configure .f.nextname -pady 8
+grid configure .f.n -pady 12
+grid configure .f.n -padx 12
 
 pack .f -expand yes -fill both
 

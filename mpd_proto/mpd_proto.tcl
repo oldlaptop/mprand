@@ -92,6 +92,7 @@ proc sendstr {str} {
 # @return true if MPD responded OK, false if MPD responded ACK
 proc send_command {cmd {upresponse ""} {timeout true}} {
 	if {$mpd_proto::idling && $cmd ne "noidle" && $cmd ne "idle"} {
+		log "leaving idle loop" 1
 		send_command noidle
 		set mpd_proto::idling false
 	}
@@ -154,6 +155,17 @@ proc cdict {inlist} {
 }
 
 ##
+# Quote a parameter (such as a filename) for sending over the wire to MPD.
+#
+# @param str String to quote
+#
+# @return str quoted for MPD
+proc quote {str} {
+	puts "\"[string map {\" \\\" \\ \\\\} $str]\""
+	return "\"[string map {\" \\\" \\ \\\\} $str]\""
+}
+
+##
 # Simple error-checking case; returns MPD's response in dict form if a call
 # succeeded, and errors with MPD's response in the message if it did not.
 #
@@ -181,12 +193,13 @@ proc connect {host port} {
 		variable mpd_sock
 		variable mpd_version
 		set mpd_sock [socket $host $port]
-		chan configure $mpd_sock -blocking 0
+		chan configure $mpd_sock -blocking 0 -translation binary
 
 		set protover [readln]
 
 		if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
-			return [set mpd_version [string range $protover 7 end]]
+			log "connected to mpd: $protover" 1
+			return [set mpd_version [string range $protover 7 end-1]]
 		} else {
 			error "could not connect to MPD (response: $protover)"
 		}
@@ -202,6 +215,7 @@ proc disconnect {} {
 	chan close $mpd_proto::mpd_sock
 	set mpd_proto::mpd_sock ""
 	set mpd_proto::mpd_version ""
+	set mpd_proto::idling false
 }
 namespace export disconnect
 
@@ -290,7 +304,7 @@ namespace export nsongs
 #         'file', containing the file's path in MPD's hierarchy, and 'duration',
 #         in seconds.
 proc rnd_song {} {
-	if {$mpd_version < 0.20} {
+	if {$mpd_proto::mpd_version < 0.20} {
 		error "this mpd doesn't support search windows"
 	}
 
@@ -328,6 +342,48 @@ proc song_name {song} {
 	}] 0
 }
 
+##
+# Fetch a song's albumart image. Throws an error if the song has no albumart.
+# Requires MPD >= 0.21.
+#
+# @param song URI of the song
+#
+# @return A dict of the form {size <N> binary <blob>}, where <N> is the image's
+# size as reported by MPD and <blob> is the raw image binary.
+proc albumart {song} {
+	if {$mpd_proto::mpd_version < 0.21} {
+		error "this mpd doesn't support albumart"
+	}
+
+	set song [quote $song]
+	set offs 0
+	dict set ret binary {}
+	do {
+		set err [send_command "albumart $song $offs" response]
+		if {!$err} {
+			error "mpd returned error $response"
+		}
+
+		set size_end [string first \n $response]
+		dict set ret size [string trim [lindex [split [string range $response 0 $size_end-1] :] 1]]
+
+		set offs_start [expr {$size_end + 1}]
+		set offs_end [string first \n $response $offs_start]
+		set chunksize [string trim [lindex [split [string range $response $offs_start $offs_end-1] :] 1]]
+		incr offs $chunksize
+
+		set bin_start [expr {$offs_end + 1}]
+		# for bin_end we must not include the specified trailing
+		# newline; for now we just believe mpd...
+		set bin_end [expr {$bin_start + $chunksize}]
+		dict set ret binary [
+			string cat [dict get $ret binary] [string range $response $bin_start $bin_end-1]
+		]
+	} while {$offs < [dict get $ret size]}
+
+	return $ret
+}
+namespace export albumart
 
 ##
 # Set MPD's consume status. Requires MPD >= 0.15.
@@ -357,9 +413,9 @@ namespace export clear
 # @return MPD's response as a dict, which should have the form {Id [N]}, where
 #         [N] is an integer that is the song's queue-unique identifier.
 proc enq_song {song} {
-	# mpd needs quotes escaped
-	set song [string map {\" \\\"} $song]
-	set err [send_command "addid \"$song\"" response]
+	# mpd needs whitespace quoted and quotes escaped
+	set song [quote $song]
+	set err [send_command "addid $song" response]
 
 	checkerr $err $response
 }
