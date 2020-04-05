@@ -1,0 +1,348 @@
+#! /usr/bin/env wish
+
+package require Tk
+package require uri
+
+package require mpd_proto
+namespace import mpd_proto::log
+
+
+if {[catch {package require Img}] != 0} {
+	log "warning: could not find Img (often packaged as libtk-img), cover art support will be limited to builtin Tk photo backends (only PPM, PGM, PNG, GIF are guaranteed)"
+}
+
+set ::NP_MAX_LINE_PX 384
+set ::NP_COVER_SIZE 96
+set ::UPNEXT_COVER_SIZE 48
+set ::NP_MAX_NAME_LEN 48
+set ::UPNEXT_MAX_NAME_LEN 48
+
+set ::host ""
+set ::port ""
+set ::connect_text "Connect"
+
+set ::cur_id -1
+set ::next_id -1
+
+set ::next_transport_status Play
+set ::nowplaying {[Empty queue]}
+set ::upnext {[Nothing]}
+
+set ::lastsym 0
+
+namespace eval img {}
+
+proc gensym {} { return "sym[incr ::lastsym]" }
+
+set toggle_widgets {
+	.f.toggle
+	.f.skip
+}
+
+# returns the old values for those states in statespec in a form suitable for
+# reversion with change_states
+proc toggle_transport_controls {statespec} {
+	foreach path $::toggle_widgets {
+		dict set ret $path [$path state $statespec]
+	}
+	return $ret
+}
+
+# dict of the form {path newstate ...}
+proc change_states {widgetstates} {
+	dict for {path statespec} $widgetstates {
+		$path state $statespec
+	}
+}
+
+# Applies padding to a list of grid-ed widgets
+proc pad_grid_widgets {widgetList {amt 4}} {
+	foreach widget $widgetList {
+		grid configure $widget -padx $amt -pady $amt
+	}
+}
+
+# (naively) scale an image to fit within a $max * $max square; see:
+# https://wiki.tcl-lang.org/page/Image+scaling
+proc scale {imagename max} {
+	set ix [image width $imagename]
+	set iy [image height $imagename]
+	set initial [expr {max($ix, $iy)}]
+
+	set factor [expr {max($initial, $max) / min($initial, $max)}]
+
+	set mode [expr {$initial > $max ? "-subsample" : "-zoom"}]
+
+	set tmpimg [image create photo img::[gensym]]
+	$tmpimg copy $imagename
+	$imagename blank
+	$imagename copy $tmpimg -shrink $mode $factor
+	image delete $tmpimg
+}
+
+proc connect {} {
+	switch $::connect_text {
+		Connect {
+			coroutine idleCor idleloop
+
+			set ::connect_text Disconnect
+			toggle_transport_controls !disabled
+			.f.hostline.host state disabled
+			.f.hostline.port state disabled
+		}
+		Disconnect {
+			idleCor die
+
+			mpd_proto::disconnect
+			set ::cur_id -1
+			set ::next_id -1
+			set ::connect_text Connect
+			set ::nowplaying {[Empty queue]}
+			set ::upnext {[Nothing]}
+			img::cur_cover blank
+			img::next_cover blank
+
+			toggle_transport_controls disabled
+			.f.hostline.host state !disabled
+			.f.hostline.port state !disabled
+		}
+	}
+}
+
+# Call only from idleloop or guarded by idleloop termination/restart
+proc update_transport_status {status} {
+	switch [dict get $status state] {
+		play {
+			set ::next_transport_status Pause
+			.f.stop state !disabled
+			.f.skip state !disabled
+		}
+		pause {
+			set ::next_transport_status Play
+			.f.skip state !disabled
+			.f.stop state !disabled
+		}
+		stop {
+			set ::next_transport_status Play
+			.f.stop state disabled
+			.f.skip state disabled
+		}
+	}
+}
+
+# Call only from idleloop or guarded by idleloop termination/restart
+proc update_queue {status} {
+	# if we're playing the last song...
+	if {![dict exists $status nextsong] && [dict get $status state] eq "play"} {
+		mpd_proto::enq_song [lindex [dict get [mpd_proto::rnd_song] file] 0]
+		update_playlist_display [mpd_proto::player_status]
+	}
+}
+
+# Call only from idleloop or guarded by idleloop termination/restart
+proc update_playlist_display {status} {
+	set curid [expr {[dict exists $status songid]
+		? [dict get $status songid]
+		: "nil"}]
+	set nextid [expr {[dict exists $status nextsongid]
+		? [dict get $status nextsongid]
+		: "nil"}]
+
+	if {$curid ne $::cur_id || $nextid ne $::next_id} {
+		set ::cur_id $curid
+		set ::next_id $nextid
+
+		# album art transfers can take a while, during which time the event loop
+		# will be serviced and someone could fire more events on us
+		set oldstates [toggle_transport_controls disabled]
+
+		foreach {id textvar imgname namelen size} [list \
+			$curid ::nowplaying img::cur_cover \
+			$::NP_MAX_NAME_LEN $::NP_COVER_SIZE \
+			$nextid ::upnext img::next_cover \
+			$::UPNEXT_MAX_NAME_LEN \
+			$::UPNEXT_COVER_SIZE
+		] {
+			if {$id ne "nil"} {
+				set songdict [mpd_proto::song_by_queueid $id]
+				set $textvar [string range [mpd_proto::song_name $songdict] 0 $namelen-1]
+				if {[catch {
+					$imgname blank
+					$imgname put [
+						dict get [mpd_proto::albumart [lindex [dict get $songdict file] 0]] binary
+					]
+					scale $imgname $size
+				} err opts] != 0} {
+					$imgname blank
+					log "warning: could not display album art for [mpd_proto::song_name $songdict]: $err"
+					log [dict get $opts -errorinfo] 1
+				}
+
+			} else {
+				set $textvar {[None]}
+				$imgname blank
+			}
+		}
+
+		change_states $oldstates
+	}
+}
+
+proc idleloop {} {
+	if {![mpd_proto::isconnected]} {
+		mpd_proto::connect $::host $::port
+		puts goo
+	}
+
+	set status [mpd_proto::player_status]
+	update_transport_status $status
+	update_playlist_display $status
+	while {true} {
+		set subsystems [mpd_proto::idle_wait]
+		set status [mpd_proto::player_status]
+
+		foreach subsystem $subsystems {
+			puts $subsystem
+			switch $subsystem {
+				case playlist {
+					update_playlist_display $status
+					update_queue $status
+				}
+				case player {
+					update_playlist_display $status
+					update_transport_status $status
+					update_queue $status
+				}
+				default {
+				}
+			}
+		}
+	}
+}
+
+# Do not call from idleloop...
+proc toggle_transport {} {
+	# It can take a notable fraction of a second for mpd to reply, and in
+	# the meantime this will have returned
+	set oldstates [toggle_transport_controls disabled]
+
+	idleCor die ;#...because it kills the idleloop
+	switch [dict get [set status [mpd_proto::player_status]] state] {
+		play {
+			mpd_proto::pause 1
+		}
+		pause {
+			mpd_proto::pause 0
+		}
+		stop {
+			if {![dict exists $status songid]} {
+				mpd_proto::enq_song [lindex [dict get [mpd_proto::rnd_song] file] 0]
+			}
+
+			mpd_proto::play
+			update_queue $status
+		}
+	}
+	coroutine idleCor idleloop
+
+	change_states $oldstates
+}
+
+# Do not call from idleloop...
+proc stop {} {
+	set oldstates [toggle_transport_controls disabled]
+
+	idleCor die ;# because it kills the idleloop
+	mpd_proto::stop
+	coroutine idleCor idleloop
+
+	change_states $oldstates
+}
+
+# Do not call from idleloop...
+proc skip {} {
+	set oldstates [toggle_transport_controls disabled]
+
+	idleCor die ;# ...because it kills the idleloop
+	mpd_proto::next
+	coroutine idleCor idleloop
+
+	change_states $oldstates
+}
+
+ttk::frame .f
+
+ttk::frame .f.hostline
+ttk::label .f.hostline.host_label -text "MPD host:"
+ttk::entry .f.hostline.host -textvariable ::host
+ttk::label .f.hostline.port_label -text "Port:"
+ttk::entry .f.hostline.port -textvariable ::port -width 5
+ttk::button .f.hostline.connect -textvariable ::connect_text -command { connect }
+
+grid .f.hostline.host_label .f.hostline.host \
+	.f.hostline.port_label .f.hostline.port .f.hostline.connect -sticky ew
+
+grid columnconfigure .f.hostline 1 -weight 1
+grid columnconfigure .f.hostline 3 -weight 1 -minsize [winfo reqwidth .f.hostline.port]
+
+pad_grid_widgets [winfo children .f.hostline] 2
+
+image create photo img::cur_cover
+font create np_font -size 18 -slant italic
+ttk::label .f.curname -textvariable ::nowplaying -image img::cur_cover \
+	-compound left -font np_font -width -[expr {$::NP_MAX_NAME_LEN / 2}] \
+	-wraplength $::NP_MAX_LINE_PX
+
+ttk::button .f.stop -text "Stop" -width 0 -state disabled \
+	-command { coroutine [gensym] stop }
+ttk::button .f.toggle -textvariable ::next_transport_status -width 0 \
+	-command { coroutine [gensym] toggle_transport } -state disabled
+ttk::button .f.skip -text "Skip" -width 0 -state disabled \
+	-command { coroutine [gensym] skip }
+
+image create photo img::next_cover
+font create next_font -size 12 -slant italic
+
+ttk::labelframe .f.n -text "Up Next:"
+ttk::label .f.n.nextname -textvariable ::upnext -image img::next_cover \
+	-compound left -font next_font
+grid .f.n.nextname -sticky nsew -padx 4 -pady 4 -ipadx 4 -ipady 4
+grid rowconfigure .f.n 0 -minsize [expr {$::UPNEXT_COVER_SIZE + 20}]
+
+grid .f.hostline   -           -             -             -       -sticky new
+grid .f.curname    -           .f.stop       .f.toggle     .f.skip -sticky ew
+grid x             .f.n        -             -             -       -sticky w
+
+grid configure .f.curname -sticky wns
+
+grid columnconfigure .f 0 -weight 2 -minsize $::NP_COVER_SIZE
+grid columnconfigure .f 1 -weight 2 -minsize [expr {[winfo reqwidth .f.curname] + 16}]
+
+grid rowconfigure .f 1 -weight 2 -minsize [expr {$::NP_COVER_SIZE + 24}]
+grid rowconfigure .f 2 -weight 2
+
+pad_grid_widgets [winfo children .f] 2
+grid configure .f.n -pady 12
+grid configure .f.n -padx 12
+
+pack .f -expand yes -fill both
+
+trace add variable ::host write {apply {{name key op} {
+	if {[file exists $::host]} {
+		after idle [list tk_messageBox -icon error -message "AF_UNIX sockets are not supported, host \"$::host\" will probably not work."]
+	}
+}}}
+
+if {[info exists env(MPD_HOST)]} {
+	set host $env(MPD_HOST)
+} else {
+	set host localhost
+}
+
+if {[info exists env(MPD_PORT)]} {
+	set port $env(MPD_PORT)
+} else {
+	set port 6600
+}
+
+

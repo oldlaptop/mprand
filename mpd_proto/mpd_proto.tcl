@@ -3,14 +3,46 @@ package require simulation::random
 package provide mpd_proto 0.2
 
 ##
-# Basic coroutine-based event-driven MPD protocol frontend.
+# Basic coroutine-based event-driven MPD protocol frontend. All procs exported
+# by this namespace, unless otherwise noted, must be called from a coroutine
+# context.
+#
+# The minimum supported MPD version should in principle be 0.13, but this
+# severely restricts the functionality available. Commands that use features
+# introduced since that time check the version of the connected MPD and throw an
+# error if it's insufficient.
 namespace eval mpd_proto {
 
 variable CHARS_PER_READ 1024
+variable TIMEOUT 10000
 
-variable mpd_sock ""
+variable mpd_sock {}
+variable mpd_version {}
+variable idling false
 
-proc readln {} {
+proc yield_or_die {after_id chanevent} {
+	variable mpd_sock
+
+	set ret [yield]
+
+	after cancel $after_id
+	chan event $mpd_sock $chanevent {}
+
+	switch $ret {
+		die {
+			rename [info coroutine] ""
+			yield ;# will immediately terminate the coroutine context
+		}
+		timeout {
+			error "mpd did not respond after $mpd_proto::TIMEOUT ms"
+		}
+		default {
+		}
+	}
+	return $ret
+}
+
+proc readln {{timeout true}} {
 	variable CHARS_PER_READ
 	variable mpd_sock
 
@@ -18,11 +50,17 @@ proc readln {} {
 	do {
 		if {[chan blocked $mpd_sock]} {
 			chan event $mpd_sock readable [info coroutine]
-			yield
+			if {$timeout} {
+				set timeout_id [after $mpd_proto::TIMEOUT [info coroutine] timeout]
+			} else {
+				set timeout_id {} ;# cancelling this is a nop
+			}
+			yield_or_die $timeout_id readable
 		}
 		set ret [string cat $ret [read $mpd_sock $CHARS_PER_READ]]
-	} until {[string index $ret end] eq "\n"}
-	chan event $mpd_sock readable {}
+	} until {[string match "*OK\n" $ret] ||
+	         [string match "OK MPD *\n" $ret] ||
+	         [string match "ACK \\\[*@*\\\] \{*\} *\n" $ret]}
 
 	return $ret
 }
@@ -34,33 +72,40 @@ proc sendstr {str} {
 	variable mpd_sock
 
 	chan event $mpd_sock writable [info coroutine]
-	yield
+	set timeout_id [after $mpd_proto::TIMEOUT [info coroutine] timeout]
+	yield_or_die $timeout_id writable
 
 	puts $mpd_sock $str
-
-	chan event $mpd_sock writable {}
 }
 
 ##
-# Send a raw command string to MPD, and place its response into a variable.
+# Send a raw command string to MPD, and place its response into a variable. If
+# there was a pending idle event, it is cancelled; the caller is advised to
+# restart any idle_wait loop that may have been ongoing.
 #
 # @param[in] cmd The string to send MPD, as it will go over the wire.
 # @param[out] upresponse Name of a variable into which MPD's response will be
 #                        placed. If not specified, the response will be thrown
 #                        away.
+# @param[in] timeout Whether to enable timeouts for the reply
 #
 # @return true if MPD responded OK, false if MPD responded ACK
-proc send_command {cmd {upresponse ""}} {
+proc send_command {cmd {upresponse ""} {timeout true}} {
+	if {$mpd_proto::idling && $cmd ne "noidle" && $cmd ne "idle"} {
+		log "leaving idle loop" 1
+		send_command noidle
+		set mpd_proto::idling false
+	}
 	variable mpd_sock
 
 	if {$upresponse ne ""} {
 		upvar $upresponse response
 	}
-	
+
 	sendstr $cmd
 	
 	flush $mpd_sock
-	set response [readln]
+	set response [readln $timeout]
 
 	if {[string match "*OK*" $response]} {
 		log "mpd command $cmd successful" 1
@@ -72,7 +117,7 @@ proc send_command {cmd {upresponse ""}} {
 
 		return false
 	} else {
-		set response "$response\n[gets $mpd_sock]"
+		error "incomprehensible response from MPD: $response"
 	}
 }
 
@@ -82,7 +127,12 @@ proc send_command {cmd {upresponse ""}} {
 #
 # @param[in] inlist Raw key: value response from MPD
 #
-# @return inlist converted to dict form
+# @return inlist converted to dict form, with keys normalized to all-lowercase;
+#         values are lists, with repeated keys stored as multiple elements.
+#         Most of these lists will generally have a single element, and values
+#         that are specified in the protocol as a single integer or word (i.e.
+#         that contain no whitespace) should be safe to use directly without
+#         [lindex $foo 0].
 proc cdict {inlist} {
 	set ret [dict create]
 	foreach elem [split $inlist \n] {
@@ -91,12 +141,28 @@ proc cdict {inlist} {
 		set pivot [string first : $elem]
 		# if mpd uses the empty string as a key, I don't like it anymore
 		if {$pivot > 0} {
-			set key [string range $elem 0 [expr $pivot - 1]]
+			set key [string tolower [string range $elem 0 [expr $pivot - 1]]]
 			set val [string range $elem [expr $pivot + 2] end]
-			dict set ret $key $val
+
+			if {[dict exists $ret $key]} {
+				log "warning: duplicate keys from mpd: $key (values [dict get $ret $key], $val)" 2
+			}
+
+			dict lappend ret $key $val
 		}
 	}
 	return $ret
+}
+
+##
+# Quote a parameter (such as a filename) for sending over the wire to MPD.
+#
+# @param str String to quote
+#
+# @return str quoted for MPD
+proc quote {str} {
+	puts "\"[string map {\" \\\" \\ \\\\} $str]\""
+	return "\"[string map {\" \\\" \\ \\\\} $str]\""
 }
 
 ##
@@ -123,28 +189,64 @@ proc checkerr {err {response nil}} {
 #
 # @return MPD's protocol version.
 proc connect {host port} {
-	variable mpd_sock
-	set mpd_sock [socket $host $port]
-	chan configure $mpd_sock -blocking 0
+	if {![isconnected]} {
+		variable mpd_sock
+		variable mpd_version
+		set mpd_sock [socket $host $port]
+		chan configure $mpd_sock -blocking 0 -translation binary
 
-	set protover [readln]
+		set protover [readln]
 
-	if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
-		return [string range $protover 7 end]
+		if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
+			log "connected to mpd: $protover" 1
+			return [set mpd_version [string range $protover 7 end-1]]
+		} else {
+			error "could not connect to MPD (response: $protover)"
+		}
 	} else {
-		error "could not connect to MPD (response: $protover)"
+		error "already connected; call disconnect first?"
 	}
 }
 namespace export connect
 
 ##
-# Wait in the event loop until MPD signals an idleevent.
+# Disconnect from MPD.
+proc disconnect {} {
+	chan close $mpd_proto::mpd_sock
+	set mpd_proto::mpd_sock ""
+	set mpd_proto::mpd_version ""
+	set mpd_proto::idling false
+}
+namespace export disconnect
+
+##
+# Does not require a coroutine context.
+#
+# @return true if the connection is open to the best of our knowledge, false
+#         otherwise
+proc isconnected {} {
+	expr {$mpd_proto::mpd_sock ne ""}
+}
+namespace export isconnected
+
+##
+# Wait in the event loop until MPD signals an idleevent. Requires MPD >=0.14.
 #
 # @return MPD's <a href="https://www.musicpd.org/doc/html/protocol.html#command-idle">
 #         idleevent response as a list of each changed subsystem.
 proc idle_wait {} {
+	if {$mpd_proto::idling} {
+		error "already idling"
+	}
+	if {$mpd_proto::mpd_version < 0.14} {
+		error "this mpd doesn't support idle"
+	}
+
 	set ret [list]
-	set err [send_command idle response]
+
+	set mpd_proto::idling true
+	set err [send_command idle response false]
+	set mpd_proto::idling false
 
 	checkerr $err
 	foreach {changed subsystem} [string map {: { }} $response] {
@@ -152,6 +254,9 @@ proc idle_wait {} {
 			lappend ret $subsystem
 		}
 	}
+
+	log "mpd reports change(s) in: $ret" 1
+
 	return $ret
 }
 namespace export idle_wait
@@ -191,6 +296,7 @@ namespace export nsongs
 
 ##
 # Fetch a random song from MPD's database, with uniform(ish) distribution.
+# Requires MPD >= 0.20.
 #
 # @return A large dict from MPD containing information on the selected song. Its
 #         contents do not appear to be documented, and depend to some extent on
@@ -198,6 +304,10 @@ namespace export nsongs
 #         'file', containing the file's path in MPD's hierarchy, and 'duration',
 #         in seconds.
 proc rnd_song {} {
+	if {$mpd_proto::mpd_version < 0.20} {
+		error "this mpd doesn't support search windows"
+	}
+
 	set rng [::simulation::random::prng_Discrete [expr [nsongs] -1]]
 	set songnum [$rng]
 
@@ -208,15 +318,86 @@ proc rnd_song {} {
 namespace export rnd_song
 
 ##
-# Set MPD's consume status.
+# Fetch a song from the queue, by id
 #
-# @param[in] status New consume status.
-proc consume {status} {
+# @param id A song's queue-unique identifier
+#
+# @return A large dict from MPD containing information on the selected song.
+proc song_by_queueid {id} {
+	set err [send_command "playlistid $id" response]
+	return [checkerr $err $response]
+}
+
+##
+# Get a song's title from a song-dict. Does not require a coroutine context.
+#
+# @param song A song-dict as returned from rnd_song, song_by_queueid, etc.
+#
+# @return The song's title, or its filename if there is no title tag.
+proc song_name {song} {
+	lindex [expr {
+		[dict exists $song title]
+			? [dict get $song title]
+			: [file tail [dict get $song file]]
+	}] 0
+}
+
+##
+# Fetch a song's albumart image. Throws an error if the song has no albumart.
+# Requires MPD >= 0.21.
+#
+# @param song URI of the song
+#
+# @return A dict of the form {size <N> binary <blob>}, where <N> is the image's
+# size as reported by MPD and <blob> is the raw image binary.
+proc albumart {song} {
+	if {$mpd_proto::mpd_version < 0.21} {
+		error "this mpd doesn't support albumart"
+	}
+
+	set song [quote $song]
+	set offs 0
+	dict set ret binary {}
+	do {
+		set err [send_command "albumart $song $offs" response]
+		if {!$err} {
+			error "mpd returned error $response"
+		}
+
+		set size_end [string first \n $response]
+		dict set ret size [string trim [lindex [split [string range $response 0 $size_end-1] :] 1]]
+
+		set offs_start [expr {$size_end + 1}]
+		set offs_end [string first \n $response $offs_start]
+		set chunksize [string trim [lindex [split [string range $response $offs_start $offs_end-1] :] 1]]
+		incr offs $chunksize
+
+		set bin_start [expr {$offs_end + 1}]
+		# for bin_end we must not include the specified trailing
+		# newline; for now we just believe mpd...
+		set bin_end [expr {$bin_start + $chunksize}]
+		dict set ret binary [
+			string cat [dict get $ret binary] [string range $response $bin_start $bin_end-1]
+		]
+	} while {$offs < [dict get $ret size]}
+
+	return $ret
+}
+namespace export albumart
+
+##
+# Set MPD's consume status. Requires MPD >= 0.15.
+#
+# @param[in] val New consume status.
+proc consume {val} {
+	if {$mpd_proto::mpd_version < 0.15} {
+		error "this mpd doesn't support consume"
+	}
 	if {!($status == 0 || $status == 1)} {
 		error "invalid consume status $status"
 	}
 
-	checkerr [send_command "consume $status"]
+	checkerr [send_command "consume $val"]
 }
 namespace export consume
 
@@ -235,9 +416,9 @@ namespace export clear
 # @return MPD's response as a dict, which should have the form {Id [N]}, where
 #         [N] is an integer that is the song's queue-unique identifier.
 proc enq_song {song} {
-	# mpd needs quotes escaped
-	set song [string map {\" \\\"} $song]
-	set err [send_command "addid \"$song\"" response]
+	# mpd needs whitespace quoted and quotes escaped
+	set song [quote $song]
+	set err [send_command "addid $song" response]
 
 	checkerr $err $response
 }
@@ -249,5 +430,32 @@ proc play {} {
 	checkerr [send_command "play"]
 }
 namespace export play
+
+##
+# Set pause status, or just pause if given no arguments.
+#
+# @param[in] status New pause status
+proc pause {{status 1}} {
+	if {!($status == 0 || $status == 1)} {
+		error "invalid pause status $status"
+	}
+
+	checkerr [send_command "pause $status"]
+}
+namespace export pause
+
+##
+# Skip to the next song.
+proc next {} {
+	checkerr [send_command "next"]
+}
+namespace export next
+
+##
+# Stop playback.
+proc stop {} {
+	checkerr [send_command "stop"]
+}
+namespace export stop
 
 } ;# namespace eval mpd_proto

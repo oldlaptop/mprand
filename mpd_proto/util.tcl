@@ -13,7 +13,7 @@ if {[info exists env(LOG_LEVEL)]} {
 variable logchan stderr
 
 ##
-# Send a message to the log.
+# Send a message to the log. Does not require a coroutine context.
 #
 # @param[in] msg Message to send
 # @param[in] priority Log priority (see log_level)
