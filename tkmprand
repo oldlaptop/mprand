@@ -168,12 +168,12 @@ proc update_playlist_display {status} {
 				set $textvar [string range [mpd_proto::song_name $songdict] 0 $namelen-1]
 				if {[catch {
 					$imgname blank
-					$imgname put [
+					image create photo $imgname -data [
 						dict get [mpd_proto::albumart [lindex [dict get $songdict file] 0]] binary
 					]
 					scale $imgname $size
 				} err opts] != 0} {
-					$imgname blank
+					image create photo $imgname
 					log "warning: could not display album art for [mpd_proto::song_name $songdict]: $err"
 					log [dict get $opts -errorinfo] 1
 				}
