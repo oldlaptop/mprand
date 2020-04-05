@@ -21,6 +21,9 @@ set ::host ""
 set ::port ""
 set ::connect_text "Connect"
 
+set ::cur_id -1
+set ::next_id -1
+
 set ::next_transport_status Play
 set ::nowplaying {[Empty queue]}
 set ::upnext {[Nothing]}
@@ -91,6 +94,8 @@ proc connect {} {
 			idleCor die
 
 			mpd_proto::disconnect
+			set ::cur_id -1
+			set ::next_id -1
 			set ::connect_text Connect
 			set ::nowplaying {[Empty queue]}
 			set ::upnext {[Nothing]}
@@ -127,8 +132,8 @@ proc update_transport_status {status} {
 
 # Call only from idleloop or guarded by idleloop termination/restart
 proc update_queue {status} {
-	# if we're on the last song...
-	if {![dict exists $status nextsong]} {
+	# if we're playing the last song...
+	if {![dict exists $status nextsong] && [dict get $status state] eq "play"} {
 		mpd_proto::enq_song [lindex [dict get [mpd_proto::rnd_song] file] 0]
 		update_playlist_display [mpd_proto::player_status]
 	}
@@ -143,32 +148,43 @@ proc update_playlist_display {status} {
 		? [dict get $status nextsongid]
 		: "nil"}]
 
-	foreach {id textvar imgname namelen size} [list \
-		$curid ::nowplaying img::cur_cover \
-		$::NP_MAX_NAME_LEN $::NP_COVER_SIZE \
-		$nextid ::upnext img::next_cover \
-		$::UPNEXT_MAX_NAME_LEN \
-		$::UPNEXT_COVER_SIZE
-	] {
-		if {$id ne "nil"} {
-			set songdict [mpd_proto::song_by_queueid $id]
-			set $textvar [string range [mpd_proto::song_name $songdict] 0 $namelen-1]
-			if {[catch {
-				$imgname blank
-				$imgname put [
-					dict get [mpd_proto::albumart [lindex [dict get $songdict file] 0]] binary
-				]
-				scale $imgname $size
-			} err opts] != 0} {
-				$imgname blank
-				log "warning: could not display album art for [mpd_proto::song_name $songdict]: $err"
-				log [dict get $opts -errorinfo] 1
-			}
+	if {$curid ne $::cur_id || $nextid ne $::next_id} {
+		set ::cur_id $curid
+		set ::next_id $nextid
 
-		} else {
-			set $textvar {[None]}
-			$imgname blank
+		# album art transfers can take a while, during which time the event loop
+		# will be serviced and someone could fire more events on us
+		set oldstates [toggle_transport_controls disabled]
+
+		foreach {id textvar imgname namelen size} [list \
+			$curid ::nowplaying img::cur_cover \
+			$::NP_MAX_NAME_LEN $::NP_COVER_SIZE \
+			$nextid ::upnext img::next_cover \
+			$::UPNEXT_MAX_NAME_LEN \
+			$::UPNEXT_COVER_SIZE
+		] {
+			if {$id ne "nil"} {
+				set songdict [mpd_proto::song_by_queueid $id]
+				set $textvar [string range [mpd_proto::song_name $songdict] 0 $namelen-1]
+				if {[catch {
+					$imgname blank
+					$imgname put [
+						dict get [mpd_proto::albumart [lindex [dict get $songdict file] 0]] binary
+					]
+					scale $imgname $size
+				} err opts] != 0} {
+					$imgname blank
+					log "warning: could not display album art for [mpd_proto::song_name $songdict]: $err"
+					log [dict get $opts -errorinfo] 1
+				}
+
+			} else {
+				set $textvar {[None]}
+				$imgname blank
+			}
 		}
+
+		change_states $oldstates
 	}
 }
 
@@ -178,10 +194,7 @@ proc idleloop {} {
 		puts goo
 	}
 
-	puts foo
-
 	set status [mpd_proto::player_status]
-	puts bar
 	update_transport_status $status
 	update_playlist_display $status
 	while {true} {
@@ -189,6 +202,7 @@ proc idleloop {} {
 		set status [mpd_proto::player_status]
 
 		foreach subsystem $subsystems {
+			puts $subsystem
 			switch $subsystem {
 				case playlist {
 					update_playlist_display $status
@@ -221,6 +235,10 @@ proc toggle_transport {} {
 			mpd_proto::pause 0
 		}
 		stop {
+			if {![dict exists $status songid]} {
+				mpd_proto::enq_song [lindex [dict get [mpd_proto::rnd_song] file] 0]
+			}
+
 			mpd_proto::play
 			update_queue $status
 		}
@@ -287,20 +305,18 @@ font create next_font -size 12 -slant italic
 
 ttk::labelframe .f.n -text "Up Next:"
 ttk::label .f.n.nextname -textvariable ::upnext -image img::next_cover \
-	-compound left -font next_font -width -$::UPNEXT_MAX_NAME_LEN
-grid .f.n.nextname -sticky nsew
-grid rowconfigure .f.n 0 -minsize $::UPNEXT_COVER_SIZE
+	-compound left -font next_font
+grid .f.n.nextname -sticky nsew -padx 4 -pady 4 -ipadx 4 -ipady 4
+grid rowconfigure .f.n 0 -minsize [expr {$::UPNEXT_COVER_SIZE + 20}]
 
 grid .f.hostline   -           -             -             -       -sticky new
 grid .f.curname    -           .f.stop       .f.toggle     .f.skip -sticky ew
-grid x             .f.n        -             -             x       -sticky w
+grid x             .f.n        -             -             -       -sticky w
 
 grid configure .f.curname -sticky wns
 
 grid columnconfigure .f 0 -weight 2 -minsize $::NP_COVER_SIZE
 grid columnconfigure .f 1 -weight 2 -minsize [expr {[winfo reqwidth .f.curname] + 16}]
-grid columnconfigure .f 2 -weight 1
-grid columnconfigure .f 3 -weight 1
 
 grid rowconfigure .f 1 -weight 2 -minsize [expr {$::NP_COVER_SIZE + 24}]
 grid rowconfigure .f 2 -weight 2
