@@ -109,15 +109,15 @@ proc send_command {cmd {upresponse ""} {timeout true}} {
 
 	if {[string match "*OK*" $response]} {
 		log "mpd command $cmd successful" 1
-		log "{response $response}" 2
+		log "{response [string trim $response]}" 2
 
 		return true
 	} elseif {[string match "ACK*" $response]} {
-		log "mpd error: $cmd failed ($response)" 1
+		log "mpd error: $cmd failed ([string trim $response])" 1
 
 		return false
 	} else {
-		error "incomprehensible response from MPD: $response"
+		error "incomprehensible response from MPD: [string trim $response]"
 	}
 }
 
@@ -176,7 +176,7 @@ proc checkerr {err {response nil}} {
 	if {$err} {
 		return [expr {$response eq "nil" ? "nil" : [cdict $response]}]
 	} else {
-		error "mpd returned error $response"
+		error "mpd returned error [string trim $response]"
 	}
 }
 
@@ -197,7 +197,7 @@ proc connect {host port} {
 		set protover [readln]
 
 		if {"{[string range $protover 0 5]}" == "{OK MPD}"} {
-			log "connected to mpd: $protover" 1
+			log "connected to mpd: [string trim $protover]" 1
 			return [set mpd_version [string range $protover 7 end-1]]
 		} else {
 			error "could not connect to MPD (response: $protover)"
@@ -360,7 +360,7 @@ proc albumart {song} {
 	do {
 		set err [send_command "albumart $song $offs" response]
 		if {!$err} {
-			error "mpd returned error $response"
+			error "mpd returned error [string trim $response]"
 		}
 
 		set size_end [string first \n $response]
