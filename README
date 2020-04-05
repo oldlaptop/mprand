@@ -9,17 +9,24 @@ gapless playback can function, and the built-in http streaming server will not
 go down between songs); this also serves as a primitive yet elegant "up next"
 feature.
 
-The code mprand uses to talk to MPD is factored into a package named mpd_proto;
-this may prove useful as the nucleus of an MPD client library for some other
-purpose; expanding mpd_proto into a full MPD client library for Tcl is a long-
-term goal.
+tkmprand expands on this concept by providing a GUI client for perpetual random
+play, providing a status and up-next display and minimal transport controls,
+automatically appending random songs to the queue so it never runs out.
+
+The code mprand and tkmprand use to talk to MPD is factored into a package named
+mpd_proto; this may prove useful as the nucleus of an MPD client library for
+some other purpose; expanding mpd_proto into a full MPD client library for Tcl
+is a long-term goal.
 
 USAGE
 
-At the moment this script accepts no options; simply execute it, and it will
-begin random-playing on localhost:6600 (or the host and port specified by
-MPD_HOST and MPD_PORT, if these environment variables are set). Random play
-continues until another client stops playback, at which point mprand will
-terminate. Note that the mpd_proto/ directory must be located somewhere in
-Tcl's package search path; the easiest way to accomplish this is to set
-TCLLIBPATH="." or something to that effect in the environment.
+At the moment these scripts accept no options. mprand will, when executed, begin
+random-playing on localhost:6600 (or the host and port specified by MPD_HOST and
+MPD_PORT, if these environment variables are set). Random play continues until
+another client stops playback, at which point mprand will terminate.
+
+Note that the mpd_proto/ directory must be located somewhere in Tcl's package
+search path; the easiest way to accomplish this is to set TCLLIBPATH="." or
+something to that effect in the environment. Both scripts also require
+simulation::random from tcllib, and tkmprand won't be able to display JPEG cover
+art without Img (packaged as libtk-img on Debian and derivatives).
