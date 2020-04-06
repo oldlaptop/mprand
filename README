@@ -15,7 +15,7 @@ automatically appending random songs to the queue so it never runs out.
 
 The code mprand and tkmprand use to talk to MPD is factored into a package named
 mpd_proto; this may prove useful as the nucleus of an MPD client library for
-some other purpose; expanding mpd_proto into a full MPD client library for Tcl
+some other purpose. Expanding mpd_proto into a full MPD client library for Tcl
 is a long-term goal.
 
 USAGE
@@ -30,3 +30,8 @@ search path; the easiest way to accomplish this is to set TCLLIBPATH="." or
 something to that effect in the environment. Both scripts also require
 simulation::random from tcllib, and tkmprand won't be able to display JPEG cover
 art without Img (packaged as libtk-img on Debian and derivatives).
+
+CAVEATS
+
+Neither client supports connecting to MPD with a UNIX domain socket, since (to
+my knowledge) the Tcl core doesn't support UNIX domain sockets.
