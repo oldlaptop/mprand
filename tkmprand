@@ -340,7 +340,7 @@ grid configure .f.n -padx 12
 pack .f -expand yes -fill both
 
 trace add variable ::host write {apply {{name key op} {
-	if {[file exists $::host]} {
+	if {[file exists $::host] && [file type $::host] eq "socket"} {
 		after idle [list tk_messageBox -icon error -message "AF_UNIX sockets are not supported, host \"$::host\" will probably not work."]
 	}
 }}}
