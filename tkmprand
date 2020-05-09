@@ -216,16 +216,17 @@ proc idleloop {} {
 
 		foreach subsystem $subsystems {
 			switch $subsystem {
-				case playlist {
+				playlist {
 					update_playlist_display $status
 					update_queue $status
 				}
-				case player {
+				player {
 					update_playlist_display $status
 					update_transport_status $status
 					update_queue $status
 				}
 				default {
+					log "warning: not handling idle event on $subsystem" 1
 				}
 			}
 		}
