@@ -25,10 +25,10 @@ if {[catch {package require Img}] != 0} {
 	log "warning: could not find Img (often packaged as libtk-img), cover art support will be limited to builtin Tk photo backends (only PPM, PGM, PNG, GIF are guaranteed)"
 }
 
-set ::NP_MAX_LINE_PX 384
+set ::NP_INIT_WIDTH 32
+set ::NP_MAX_NAME_LEN 96
 set ::NP_COVER_SIZE 96
 set ::UPNEXT_COVER_SIZE 48
-set ::NP_MAX_NAME_LEN 48
 set ::UPNEXT_MAX_NAME_LEN 48
 
 set ::host ""
@@ -174,12 +174,17 @@ proc update_playlist_display {status} {
 			$curid ::nowplaying img::cur_cover \
 			$::NP_MAX_NAME_LEN $::NP_COVER_SIZE \
 			$nextid ::upnext img::next_cover \
-			$::UPNEXT_MAX_NAME_LEN \
-			$::UPNEXT_COVER_SIZE
+			$::UPNEXT_MAX_NAME_LEN $::UPNEXT_COVER_SIZE
 		] {
 			if {$id ne "nil"} {
 				set songdict [mpd_proto::song_by_queueid $id]
-				set $textvar [string range [mpd_proto::song_name $songdict] 0 $namelen-1]
+				set fullname [mpd_proto::song_name $songdict]
+				if {$namelen < [string length $fullname]} {
+					set $textvar [string range $fullname 0 $namelen-4]...
+				} else {
+					set $textvar $fullname
+				}
+
 				if {[catch {
 					$imgname blank
 					image create photo $imgname -data [
@@ -302,9 +307,11 @@ pad_grid_widgets [winfo children .f.hostline] 2
 
 image create photo img::cur_cover
 font create np_font -size 18 -slant italic
-ttk::label .f.curname -textvariable ::nowplaying -image img::cur_cover \
-	-compound left -font np_font -width -[expr {$::NP_MAX_NAME_LEN / 2}] \
-	-wraplength $::NP_MAX_LINE_PX
+ttk::label .f.curcover -image img::cur_cover -relief groove
+# A is a pretty average character, right?
+ttk::label .f.curname -textvariable ::nowplaying -font np_font \
+	-width $::NP_INIT_WIDTH \
+	-wraplength [expr {[font measure np_font -displayof . [string repeat H $::NP_INIT_WIDTH]] - $::NP_COVER_SIZE}]
 
 ttk::button .f.stop -text "Stop" -width 0 -state disabled \
 	-command { coroutine [gensym] stop }
@@ -315,30 +322,40 @@ ttk::button .f.skip -text "Skip" -width 0 -state disabled \
 
 image create photo img::next_cover
 font create next_font -size 12 -slant italic
-
 ttk::labelframe .f.n -text "Up Next:"
 ttk::label .f.n.nextname -textvariable ::upnext -image img::next_cover \
 	-compound left -font next_font
+
 grid .f.n.nextname -sticky nsew -padx 4 -pady 4 -ipadx 4 -ipady 4
 grid rowconfigure .f.n 0 -minsize [expr {$::UPNEXT_COVER_SIZE + 20}]
 
-grid .f.hostline   -           -             -             -       -sticky new
-grid .f.curname    -           .f.stop       .f.toggle     .f.skip -sticky ew
-grid x             .f.n        -             -             -       -sticky w
+grid .f.hostline   -           -           -             -             -       -sticky new
+grid .f.curcover   .f.curname  -           .f.stop       .f.toggle     .f.skip -sticky ew
+grid x             x           .f.n        -             -             -       -sticky w
 
-grid configure .f.curname -sticky wns
+after idle {
+	grid configure .f.curname -sticky wns
 
-grid columnconfigure .f 0 -weight 2 -minsize $::NP_COVER_SIZE
-grid columnconfigure .f 1 -weight 2 -minsize [expr {[winfo reqwidth .f.curname] + 16}]
+	grid columnconfigure .f 1 -weight 1
+	grid columnconfigure .f 2 -weight 8
 
-grid rowconfigure .f 1 -weight 2 -minsize [expr {$::NP_COVER_SIZE + 24}]
-grid rowconfigure .f 2 -weight 2
+	grid rowconfigure .f 1 -weight 2 -minsize $::NP_COVER_SIZE
+	grid rowconfigure .f 2 -weight 2 -minsize [winfo reqheight .f.n]
 
-pad_grid_widgets [winfo children .f] 2
-grid configure .f.n -pady 12
-grid configure .f.n -padx 12
+	pad_grid_widgets [winfo children .f] 2
+	grid configure .f.n -pady 12
+	grid configure .f.n -padx 12
 
-pack .f -expand yes -fill both
+	pack .f -expand yes -fill both
+	after idle {
+		wm minsize . [expr {
+			$::NP_COVER_SIZE +
+			[winfo reqwidth .f.stop] +
+			[winfo reqwidth .f.toggle] +
+			[winfo reqwidth .f.skip] + 24
+		}] [winfo reqheight .]
+	}
+}
 
 trace add variable ::host write {apply {{name key op} {
 	if {[file exists $::host] && [file type $::host] eq "socket"} {
