@@ -229,6 +229,7 @@ proc disconnect {} {
 	set mpd_proto::mpd_sock ""
 	set mpd_proto::mpd_version ""
 	set mpd_proto::idling false
+	aacache::flush
 }
 namespace export disconnect
 
@@ -357,46 +358,90 @@ proc song_name {song} {
 
 ##
 # Fetch a song's albumart image. Throws an error if the song has no albumart.
+# The retrieved image will be stored in a permanent (for the life of the
+# connection) cache, and this proc serves images from the cache in strict
+# preference to making network requests; a new network request, overwriting the
+# cached value, may be forced by setting the second parameter to false.
 # Requires MPD >= 0.21.
 #
 # @param song URI of the song
 #
 # @return A dict of the form {size <N> binary <blob>}, where <N> is the image's
 # size as reported by MPD and <blob> is the raw image binary.
-proc albumart {song} {
+proc albumart {song {use_cache yes}} {
 	if {$mpd_proto::mpd_version < 0.21} {
 		error "this mpd doesn't support albumart"
 	}
 
 	set song [quote $song]
-	set offs 0
-	dict set ret binary {}
-	do {
-		set err [send_command "albumart $song $offs" response]
-		if {!$err} {
-			error "mpd returned error [string trim $response]"
-		}
 
-		set size_end [string first \n $response]
-		dict set ret size [string trim [lindex [split [string range $response 0 $size_end-1] :] 1]]
-
-		set offs_start [expr {$size_end + 1}]
-		set offs_end [string first \n $response $offs_start]
-		set chunksize [string trim [lindex [split [string range $response $offs_start $offs_end-1] :] 1]]
-		incr offs $chunksize
-
-		set bin_start [expr {$offs_end + 1}]
-		# for bin_end we must not include the specified trailing
-		# newline; for now we just believe mpd...
-		set bin_end [expr {$bin_start + $chunksize}]
-		dict set ret binary [
-			string cat [dict get $ret binary] [string range $response $bin_start $bin_end-1]
-		]
-	} while {$offs < [dict get $ret size]}
-
-	return $ret
+	if {$use_cache} {
+		return [aacache::get $song]
+	} else {
+		return [aacache::miss $song]
+	}
 }
 namespace export albumart
+
+namespace eval aacache {
+	# the default path is documented as empty, but perhaps that'll change
+	namespace path [concat ::mpd_proto [namespace path]]
+
+	# Names are MPD song URIs, values are result-dicts as defined in
+	# mpd_proto::albumart's comment block
+	array set cache {}
+
+	# Clear the cache.
+	proc flush {} { array unset mpd_proto::aacache::cache *}
+
+	# Retrieve a song through the cache
+	proc get {song} {
+		variable cache
+
+		if {[array names cache $song] eq ""} {
+			miss $song
+		}
+
+		return [lindex [array get cache $song] 1]
+	}
+
+	# Add a song to the cache from MPD, overwriting any existing value
+	proc miss {song} {
+		variable cache
+
+		log "note: albumart cache miss for $song" 1
+
+		set ret [dict create]
+		set offs 0
+		dict set ret binary {}
+
+		do {
+			set err [send_command "albumart $song $offs" response]
+			if {!$err} {
+				error "mpd returned error [string trim $response]"
+			}
+
+			set size_end [string first \n $response]
+			dict set ret size [string trim [lindex [split [string range $response 0 $size_end-1] :] 1]]
+
+			set offs_start [expr {$size_end + 1}]
+			set offs_end [string first \n $response $offs_start]
+			set chunksize [string trim [lindex [split [string range $response $offs_start $offs_end-1] :] 1]]
+			incr offs $chunksize
+
+			set bin_start [expr {$offs_end + 1}]
+			# for bin_end we must not include the specified trailing
+			# newline; for now we just believe mpd...
+			set bin_end [expr {$bin_start + $chunksize}]
+			dict set ret binary [
+				string cat [dict get $ret binary] [string range $response $bin_start $bin_end-1]
+			]
+		} while {$offs < [dict get $ret size]}
+
+		array set cache [list $song $ret]
+		return $ret
+	}
+} ;# namespace eval aacache
 
 ##
 # Set MPD's consume status. Requires MPD >= 0.15.
