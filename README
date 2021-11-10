@@ -35,3 +35,12 @@ CAVEATS
 
 Neither client supports connecting to MPD with a UNIX domain socket, since (to
 my knowledge) the Tcl core doesn't support UNIX domain sockets.
+
+SEE ALSO
+
+ashuffle <https://github.com/Joshkunz/ashuffle> - Another special-purpose random-
+play client as mentioned above.
+
+mpd-sima <https://github.com/mxjeff/mpd-sima> - A general-purpose autoqueue client
+with numerous possible queueing policies, including random behavior similar to
+mprand and tkmprand.
