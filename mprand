@@ -23,6 +23,10 @@ interp bgerror {} {apply {{err opts} {
 	exit 1
 }}}
 
+proc enq_random {} {
+	enq_song [lindex [dict get [rnd_song] file] 0]
+}
+
 coroutine main apply { {} {
 
 log "starting..." 1
@@ -60,15 +64,26 @@ while {1} {
 	if {[lsearch [idle_wait] player] >= 0} {
 		set status [player_status]
 
-		# if we're on the last song...
-		if {[dict get $status playlistlength] eq ([dict get $status song] + 1)} {
-			enq_song [lindex [dict get [rnd_song] file] 0]
+		# if another client stopped playback...
+		if {
+			[dict get $status state] eq "stop"
+		} {
+			# Guess whether we're "stopped" because someone did an
+			# explicit `mpc stop` or equivalent, or because someone
+			# is running `mpc next` in a loop.
+			if {[dict get $status playlistlength] >= 2} {
+				log "playback stopped, terminating"
+				break
+			} else {
+				enq_random
+				play
+				continue
+			}
 		}
 
-		# if another client stopped playback...
-		if {[dict get $status state] eq "stop"} {
-			log "playback stopped, terminating"
-			break
+		# if we're on the last song...
+		if {[dict get $status playlistlength] eq ([dict get $status song] + 1)} {
+			enq_random
 		}
 	}
 }
