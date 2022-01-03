@@ -62,6 +62,12 @@ proc readln {{timeout true}} {
 
 	set ret {}
 	do {
+		if {[chan eof $mpd_sock]} {
+			disconnect
+			set ret {lost connection}
+			break
+		}
+
 		if {[chan blocked $mpd_sock]} {
 			chan event $mpd_sock readable [info coroutine]
 			if {$timeout} {
@@ -129,6 +135,9 @@ proc send_command {cmd {upresponse ""} {timeout true}} {
 	} elseif {[string match "ACK*" $response]} {
 		log "mpd error: $cmd failed ([string trim $response])" 1
 
+		return false
+	} elseif {$response == "lost connection"} {
+		log "mpd: lost connection"
 		return false
 	} else {
 		error "incomprehensible response from MPD: [string trim $response]"
@@ -262,7 +271,7 @@ proc idle_wait {} {
 	set err [send_command idle response false]
 	set mpd_proto::idling false
 
-	checkerr $err
+	checkerr $err $response
 	foreach {changed subsystem} [string map {: { }} $response] {
 		if {$changed ne "OK"} {
 			lappend ret $subsystem
